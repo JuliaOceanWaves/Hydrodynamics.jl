@@ -1,13 +1,6 @@
 import OrdinaryDiffEq as ODE
 import SciMLSensitivity as SMS # required for Zygote's reverse AD
 
-function piersonMoskowitzSpectrum(height, peakFrequency, frequencyVector)
-    spectrum = (height .^ 2) / 4 .* (1.057 .* peakFrequency) .^ 4 .*
-               frequencyVector .^ (-5) .*
-               exp.(-5 / 4 .* (peakFrequency ./ frequencyVector) .^ 4)
-    return spectrum
-end
-
 function rampFunction(start_time, ramp_time, current_time)
     if current_time < start_time
         ramp = 0.0
