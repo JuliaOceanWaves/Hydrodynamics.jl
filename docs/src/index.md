@@ -1,11 +1,11 @@
-# RepoTemplate.jl
+# Hydrodynamics.jl
 
 Tiny placeholder documentation for the RepoTemplate.jl package.
 
 ## Quick Start
 
 ```julia
-using RepoTemplate
+using Hydrodynamics
 
 greet()
 greet("Julia")
@@ -14,5 +14,5 @@ greet("Julia")
 ## API
 
 ```@autodocs
-Modules = [RepoTemplate]
+Modules = [Hydrodynamics]
 ```

@@ -1,22 +1,22 @@
-# RepoTemplate.jl
+# Hydrodynamics.jl
 
-[![CI](https://github.com/JuliaOceanWaves/RepoTemplate.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/JuliaOceanWaves/RepoTemplate.jl/actions/workflows/CI.yml)
-[![Docs](https://github.com/JuliaOceanWaves/RepoTemplate.jl/actions/workflows/Docs.yml/badge.svg)](https://github.com/JuliaOceanWaves/RepoTemplate.jl/actions/workflows/Docs.yml)
-[![Coverage](https://codecov.io/gh/JuliaOceanWaves/RepoTemplate.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/JuliaOceanWaves/RepoTemplate.jl)
+[![CI](https://github.com/JuliaOceanWaves/Hydrodynamics.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/JuliaOceanWaves/Hydrodynamics.jl/actions/workflows/CI.yml)
+[![Docs](https://github.com/JuliaOceanWaves/Hydrodynamics.jl/actions/workflows/Docs.yml/badge.svg)](https://github.com/JuliaOceanWaves/Hydrodynamics.jl/actions/workflows/Docs.yml)
+[![Coverage](https://codecov.io/gh/JuliaOceanWaves/Hydrodynamics.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/JuliaOceanWaves/Hydrodynamics.jl)
 
-Tiny placeholder package used as a JuliaOceanWaves package template.
+Time domain solutions of linear potential flow theory-based hydrodynamic systems.
 
 ## Installation
 
 ```julia
 using Pkg
-Pkg.add("RepoTemplate")
+Pkg.add("Hydrodynamics")
 ```
 
 ## Usage
 
 ```julia
-using RepoTemplate
+using Hydrodynamics
 
 greet()
 greet("Julia")
@@ -26,7 +26,7 @@ greet("Julia")
 
 ```julia
 using Pkg
-Pkg.test("RepoTemplate")
+Pkg.test("Hydrodynamics")
 ```
 
 ## License

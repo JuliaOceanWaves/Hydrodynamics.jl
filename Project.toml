@@ -1,5 +1,5 @@
-name = "RepoTemplate"
-uuid = "11232d54-3016-4358-b84a-93d6a906121d"
+name = "Hydrodynamics"
+uuid = "63c6a582-8669-4cdf-95d2-d1c53f837950"
 authors = ["Sandia National Laboratories"]
 version = "0.1.0"
 
