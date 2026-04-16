@@ -5,23 +5,23 @@ import NetCDF
 import Integrals
 
 struct Hydro
-    radiating_dof
-    influenced_dof
-    g
-    rho
-    w
-    period
-    wave_direction
-    wavelength
-    depth
-    volume
-    cb
-    ex
-    fk
-    di
-    am
-    rd
-    khs
+    radiating_dof::Any
+    influenced_dof::Any
+    g::Any
+    rho::Any
+    w::Any
+    period::Any
+    wave_direction::Any
+    wavelength::Any
+    depth::Any
+    volume::Any
+    cb::Any
+    ex::Any
+    fk::Any
+    di::Any
+    am::Any
+    rd::Any
+    khs::Any
 end
 
 function read_capytaine(filename::String)::Hydro
@@ -49,15 +49,18 @@ function read_capytaine(filename::String)::Hydro
     fk = NetCDF.ncread(filename, "Froude_Krylov_force") # Dimensions: influenced_dof wave_dir omega complex
     di = NetCDF.ncread(filename, "diffraction_force") # Dimensions: influenced_dof wave_dir omega complex
     am = NetCDF.ncread(filename, "added_mass") # Dimensions: influenced_dof radiating_dof omega
+    # ainf = am[:, :, end]
     rd = NetCDF.ncread(filename, "radiation_damping") # Dimensions: influenced_dof radiating_dof omega
     khs = NetCDF.ncread(filename, "hydrostatic_stiffness")' # Dimensions: radiating_dof influenced_dof --> influenced_dof radiating_dof
 
     # ainf, ra_t, ra_w = radiationIRF!()
-    return Hydro(radiating_dof, influenced_dof, g, rho, w, period, wave_direction, wavelength, depth, volume, cb, ex, fk, di, am, rd, khs)
+    return Hydro(radiating_dof, influenced_dof, g, rho, w, period, wave_direction,
+        wavelength, depth, volume, cb, ex, fk, di, am, rd, khs)
 end
 
-function radiationIRF!(myHydro::Hydro, timeEnd=60, nDt::Int=1001, nDw::Int=1001, wMin=minimum(myHydro.w), wMax=maximum(myHydro.w))
-    time = collect(0:timeEnd/(nDt-1):timeEnd)
+function radiationIRF!(myHydro::Hydro, timeEnd = 60, nDt::Int = 1001, nDw::Int = 1001,
+        wMin = minimum(myHydro.w), wMax = maximum(myHydro.w))
+    time = collect(0:(timeEnd / (nDt - 1)):timeEnd)
 end
 
 end

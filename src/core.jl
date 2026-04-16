@@ -23,7 +23,7 @@ function calculate_excitation_force(current_time, excitation_coeff, wave)
              excitation_coeff[:, :, :, 2] .* sin.(exponential_term)) .*
             sqrt.(2 * s .* dFrequency)
 
-    # Format required for unitful input. `sum`` doesn't play nice with matrices of mixed units and dimensions.
+    # Format required for unitful input. `sum` doesn't play nice with matrices of mixed units and dimensions.
     # So instead multiply by an identity matrix to do the same summation in another way.
     # return sum(force[:,:,:]; dims=[2,3])
     o = ones(size(force, 3))
@@ -31,9 +31,15 @@ function calculate_excitation_force(current_time, excitation_coeff, wave)
 end
 
 function hydrodynamic_oscillator(du, u, p, t)
-    (k, c, inverse_mass, excitation_coeff, wave) = p
+    (k, c, inverse_mass, excitation_coeff, constant_forces, wave) = p
     excitation_force = calculate_excitation_force(t, excitation_coeff, wave)
-    return inverse_mass * (-c * du - k * u - excitation_force)
+    return inverse_mass * (-c * du - k * u + excitation_force + constant_forces)
+end
+
+function hydrodynamic_oscillator_convolution(du, u, p, t)
+    (k, c, inverse_mass, excitation_coeff, constant_forces, wave) = p
+    excitation_force = calculate_excitation_force(t, excitation_coeff, wave)
+    return inverse_mass * (-c * du - k * u + excitation_force + constant_forces)
 end
 
 function hydrodynamic_solver(dx₀, x₀, ts, p)
