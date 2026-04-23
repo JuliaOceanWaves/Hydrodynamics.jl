@@ -1,8 +1,6 @@
 module Bemio
 
-import NCDatasets
 import NetCDF
-import Integrals
 
 struct Hydro
     radiating_dof::Any

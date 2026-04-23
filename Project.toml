@@ -1,11 +1,11 @@
 name = "Hydrodynamics"
 uuid = "63c6a582-8669-4cdf-95d2-d1c53f837950"
-authors = ["Sandia National Laboratories"]
 version = "0.1.0"
+authors = ["Sandia National Laboratories"]
 
 [deps]
-# uuids here
+NetCDF = "30363a11-5582-574a-97bb-aa9a979735b9"
 
 [compat]
-# versions here
+NetCDF = "0.12.2"
 julia = "1.10"
