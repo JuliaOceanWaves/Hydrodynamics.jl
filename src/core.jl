@@ -58,27 +58,29 @@ function hydrodynamic_oscillator_cic(du, u, p, t)
     return inverse_mass * (-c * du - k * u + excitation_force + constant_forces) # ddu
 end
 
-function hydrodynamic_oscillator_ss(du, u, p, t)
+function hydrodynamic_oscillator_ss(u, p, t)
+    # u = [x, dx, states]
     # added mass should utilize infinite frequency added mass only
     # c should not include radiation damping
     # system of equations in u and du should include velocity and the state space vector
     (k, c, inverse_mass, excitation_coeff, constant_forces, wave, state_space) = p
 
+    Aᵣ, Bᵣ, Cᵣ, Dᵣ, nₛₛ = state_space
+    n_dof = Int64((size(u)[1] - nₛₛ) / 2)
+
+    x = u[1:n_dof]
+    dx = u[(n_dof + 1):(n_dof * 2)]
+    ss = u[(end - nₛₛ + 1):end]
+
     # d(SS vector) = dx = Ar * x + Br * velocity
     #    CI kernel =  y = Cr * x + Dr * velocity
     # rad_force         = Cr * u[7:12] + Dr * du[1:6]
-    nU = length(u)
-    i_mid = Int(nU / 2)
-    if nU % 2 != 0
-        error("Hydrodynamics.jl:hydrodynamic_oscillator_ss:Length of ODEs is not even. " +
-              "Must have one state space ODE for each response ODE.")
-    end
-    Aᵣ, Bᵣ, Cᵣ, Dᵣ = state_space
-    rad_force = Cᵣ * u[(i_mid + 1):end] + Dᵣ * du[1:i_mid]
-    du_ss = Aᵣ * u[(i_mid + 1):end] + Br * du[1:i_mid]
+    rad_force = Cᵣ * ss + Dᵣ * dx
+    du_ss = Aᵣ * ss + Bᵣ * dx
 
     excitation_force = calculate_excitation_force(t, excitation_coeff, wave)
-    return inverse_mass * (-c * du - k * u + excitation_force + constant_forces + rad_force) # ddu
+    ddx = inverse_mass * (-c * dx - k * x + excitation_force + constant_forces + rad_force)
+    return [u[(n_dof + 1):(n_dof * 2)]; ddx; du_ss] # dx, ddx, du_ss
 end
 
 function hydrodynamic_solver(dx₀, x₀, ts, p)
@@ -99,10 +101,11 @@ function hydrodynamic_solver_cic(dx₀, x₀, ts, p)
     return ode_sol
 end
 
-function hydrodynamic_solver_ss(dx₀, x₀, ts, p)
+function hydrodynamic_solver_ss(u₀, ts, p)
     dt = diff(ts[1:2])[1]
-    ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator_ss, dx₀, x₀, ts[[1, end]], p)
+    # u₀ = [x₀, dx₀, states₀]
+    ode_prob = ODE.ODEProblem(
+        hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
     ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end

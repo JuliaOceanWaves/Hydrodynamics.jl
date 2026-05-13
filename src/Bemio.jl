@@ -90,30 +90,36 @@ end
 function radiation_state_space(Kᵣ, tᵣ, max_order = 10, R2t = 0.95)
     dt = Unitful.ustrip.(tᵣ[2] - tᵣ[1])
 
-    ss_A = zeros(size(Kᵣ, 1), size(Kᵣ, 2), max_order, max_order)
-    ss_B = zeros(size(Kᵣ, 1), size(Kᵣ, 2), max_order, 1)
-    ss_C = zeros(size(Kᵣ, 1), size(Kᵣ, 2), 1, max_order)
-    ss_D = zeros(size(Kᵣ)[1:2])
-    ss_K = zeros(size(Kᵣ)[1:3])
-    ss_R2 = zeros(size(Kᵣ)[1:2])
-    ss_order = zeros(size(Kᵣ)[1:2])
+    ss_A_by_dof = zeros(size(Kᵣ, 1), size(Kᵣ, 2), max_order, max_order)
+    ss_B_by_dof = zeros(size(Kᵣ, 1), size(Kᵣ, 2), max_order, 1)
+    ss_C_by_dof = zeros(size(Kᵣ, 1), size(Kᵣ, 2), 1, max_order)
+    ss_D_by_dof = zeros(size(Kᵣ)[1:2])
+    ss_K_by_dof = zeros(size(Kᵣ)[1:3])
+    ss_R2_by_dof = zeros(size(Kᵣ)[1:2])
+    ss_order_by_dof = Int64.(zeros(size(Kᵣ)[1:2]))
 
     for i in axes(Kᵣ)[1], j in axes(Kᵣ)[2]
+        print("dof: ", i, " ", j)
         irf_K = Unitful.ustrip.(Kᵣ[i, j, :])
         R2i = LinearAlgebra.norm(irf_K .- mean(irf_K))
         R2 = R2i
 
-        order = 1 # Initial state space order
+        order = 0 # Initial state space order
         y = dt .* irf_K
         n = length(y)
         h = ToeplitzMatrices.Hankel([y[2:end]; zeros(n - 1)], (n - 1, n - 1))
         u, svh, v = LinearAlgebra.svd(h)
 
         # Define variables so they pass outside of the loop 
-        local ac, bc, cc, dc, ss_K, R2
-        while R2 > R2t && order <= max_order
-            order += 1
-
+        ac = zeros(1, 1)
+        bc = zeros(1)
+        cc = zeros(1)
+        dc = 0.0
+        ss_K_each_dof = zeros(length(tᵣ))
+        # while R2 > R2t && order <= max_order
+        # order += 1
+        for m in collect(1:max_order)
+            order = m
             u1 = u[1:(n - 2), 1:order]
             v1 = v[1:(n - 2), 1:order]
             u2 = u[2:(n - 1), 1:order]
@@ -131,29 +137,50 @@ function radiation_state_space(Kᵣ, tᵣ, max_order = 10, R2t = 0.95)
             cc = c * iidd                                      # C*2/T(I+A)^{-1} = 2/T(I+A)^{-1}
             dc = d .- dt / 2 * ((c * iidd) * b)                # D-T/2C (2/T(I+A)^{-1})B = D-C(I+A)^{-1})B
 
-            ss_K = zeros(length(tᵣ))
+            ss_K_each_dof = zeros(length(tᵣ))
             method = ExpMethodNative()
             term = ac * dt * 0
             cache = ExponentialUtilities.alloc_mem(term, method) # Main allocation done here
             for k in 1:length(tᵣ)
                 term = ac * dt * (k - 1)
                 exponential!(term) # Very little allocation here
-                ss_K[k] = ((cc * term) * bc)[1] # IRF approximation using SS result
+                ss_K_each_dof[k] = ((cc * term) * bc)[1] # IRF approximation using SS result
             end
 
-            # Notes: It is unclear why R2 is scaled by R2i (the initial R2, whose definition seems dubious) before being compared to the
-            # 5% threshold. This is what WEC-Sim does and may be why the insignificant coupled dofs get forced to such high orders
-            R2 = 1 - (LinearAlgebra.norm(irf_K - ss_K) / R2i)^2
+            # Calculate R2 for the state space fit of Kᵣ. Check if above 0.95 threshold
+            R2 = 1 - (LinearAlgebra.norm(irf_K - ss_K_each_dof) / R2i)^2
+            if R2 >= R2t
+                break
+            end
         end
-        ss_A[i, j, 1:order, 1:order] = ac
-        ss_B[i, j, 1:order, 1] = bc
-        ss_C[i, j, 1, 1:order] = cc
-        ss_D[i, j] = dc
-        ss_K[i, j, :] = ss_K
-        ss_R2[i, j] = R2
-        ss_order[i, j] = order
+
+        ss_A_by_dof[i, j, 1:order, 1:order] = ac
+        ss_B_by_dof[i, j, 1:order, 1] = bc
+        ss_C_by_dof[i, j, 1, 1:order] = cc
+        ss_D_by_dof[i, j] = dc
+        ss_K_by_dof[i, j, :] = ss_K_each_dof
+        ss_R2_by_dof[i, j] = R2
+        ss_order_by_dof[i, j] = Int64(order)
+        print("; order: ", order, "\n")
     end
-    return ss_A, ss_B, ss_C, ss_D, ss_K, ss_R2, ss_order
+
+    total_order = sum(ss_order_by_dof)
+    ss_A = zeros(total_order, total_order)
+    ss_B = zeros(total_order, size(Kᵣ)[2])
+    ss_C = zeros(size(Kᵣ)[1], total_order)
+    order_count = 1
+    for i in axes(ss_A_by_dof)[1]
+        for j in axes(ss_A_by_dof)[2]
+            o1 = order_count
+            o2 = ss_order_by_dof[i, j] + order_count - 1
+            ss_A[o1:o2, o1:o2] = ss_A_by_dof[
+                i, j, 1:ss_order_by_dof[i, j], 1:ss_order_by_dof[i, j]]
+            ss_B[o1:o2, j] = ss_B_by_dof[i, j, 1:ss_order_by_dof[i, j], 1]
+            ss_C[i, o1:o2] = ss_C_by_dof[i, j, 1, 1:ss_order_by_dof[i, j]]
+            order_count = o2 + 1
+        end
+    end
+    return ss_A, ss_B, ss_C, ss_D_by_dof, ss_K_by_dof, ss_R2_by_dof, ss_order_by_dof
 end
 
 function alternate_Ainf(Kᵣ, A, w_raw, tCIC_raw)
