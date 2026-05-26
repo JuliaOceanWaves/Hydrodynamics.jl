@@ -1,6 +1,5 @@
 import OrdinaryDiffEq as ODE
 import SciMLSensitivity as SMS # required for Zygote's reverse AD
-using DSP
 
 global velocity_history
 
@@ -33,29 +32,73 @@ function calculate_excitation_force(current_time, excitation_coeff, wave)
     return force[:, 1, :] * o
 end
 
-function hydrodynamic_oscillator(du, u, p, t)
-    (k, c, inverse_mass, excitation_coeff, constant_forces, wave) = p
-    excitation_force = calculate_excitation_force(t, excitation_coeff, wave)
-    return inverse_mass * (-c * du - k * u + excitation_force + constant_forces) # ddu
+function calculate_stiffness_force(x, Kₕₛ)
+    return -Kₕₛ * x
 end
 
-function hydrodynamic_oscillator_cic(du, u, p, t)
-    (k, c, inverse_mass, excitation_coeff, constant_forces, wave, cic) = p
+function calculate_radiation_force(dx, B)
+    return -B * dx
+end
 
-    # Convolution integral
+function calculate_ci_force(dx, cic)
+    # Convolution integrals
     Kᵣ, tᵣ = cic
     global velocity_history = circshift(velocity_history, 1)
-    global velocity_history[1, :, 1] = du
-    # velocity_history = zeros(1, size(Kᵣ, 2), size(Kᵣ, 3))
-    # integrand = DSP.conv(Kᵣ, velocity_history) # nDOF, nDOF, nt
-    integrand = Kᵣ .* velocity_history # nDOF, nDOF, nt
-    dt = diff(tᵣ; dims = 3) # 1, 1, nt-1
-    rad_force = sum(
-        (integrand[:, :, 1:(end - 1)] .+ integrand[:, :, 2:end]) .* 0.5 .* dt;
-        dims = [3]) # nDOF, nDOF
+    global velocity_history[1, :, 1] = dx
+    integrand = sum(Kᵣ .* velocity_history; dims = [2])[:, 1, :] # nDOF, nDOF, nt --> nDOF, nt
+    dt = diff(tᵣ; dims = 3)[:, 1, :] # 1, nt-1
+    radiation_force = sum(
+        (integrand[:, 1:(end - 1)] .+ integrand[:, 2:end]) .* 0.5 .* dt;
+        dims = [2])[:, 1] # nDOF
+    return radiation_force
+end
 
-    excitation_force = calculate_excitation_force(t, excitation_coeff, wave)
-    return inverse_mass * (-c * du - k * u + excitation_force + constant_forces) # ddu
+function calculate_added_mass_force(ddx, A)
+    return -A * ddx
+end
+
+function calculate_linear_force(dx, x, coefficients)
+    x₀, k, c = coefficients
+    return -c * dx - k * (x - x₀)
+end
+
+function calculate_total_linear_hydro_forces(dx, x, p, t)
+    # NOTE: added mass force is not included and should be lumped with the 
+    # body's mass matrix when solving the equations of motion that depend on this calculation
+    (inverse_mass, hydro, pto, mooring) = p
+    Kₕₛ, B, excitation_coeff, F, wave = hydro[1:5]
+    Fₑₓ = calculate_excitation_force(t, excitation_coeff, wave)
+    Fₖₕₛ = calculate_stiffness_force(x, Kₕₛ)
+    Fᵣ = calculate_radiation_force(dx, B)
+    Fₚₜₒ = calculate_linear_force(dx, x, pto)
+    Fₘ = calculate_linear_force(dx, x, mooring)
+    return Fₑₓ .+ Fₖₕₛ .+ Fᵣ .+ Fₚₜₒ .+ Fₘ .+ F
+end
+
+function hydrodynamic_oscillator(u, p, t)
+    n_dof = Int64(length(u) / 2)
+    x = u[1:n_dof] # position
+    dx = u[(n_dof + 1):end] # velocity
+
+    inverse_mass = p[1]
+    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t)
+    ddx = inverse_mass * Fₜₒₜₐₗ
+
+    return [dx; ddx]
+end
+
+function hydrodynamic_oscillator_cic(u, p, t)
+    n_dof = Int64(length(u) / 2)
+    x = u[1:n_dof] # position
+    dx = u[(n_dof + 1):end] # velocity
+
+    inverse_mass = p[1]
+    cic = p[2][6]
+    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t) +
+             calculate_ci_force(dx, cic)
+    ddx = inverse_mass * Fₜₒₜₐₗ
+
+    return [dx; ddx]
 end
 
 function hydrodynamic_oscillator_ss(u, p, t)
@@ -63,27 +106,72 @@ function hydrodynamic_oscillator_ss(u, p, t)
     # added mass should utilize infinite frequency added mass only
     # c should not include radiation damping
     # system of equations in u and du should include velocity and the state space vector
-    (k, c, inverse_mass, excitation_coeff, constant_forces, wave, state_space) = p
-
+    inverse_mass = p[1]
+    state_space = p[2][6]
     Aᵣ, Bᵣ, Cᵣ, Dᵣ, nₛₛ = state_space
     n_dof = Int64((size(u)[1] - nₛₛ) / 2)
 
-    x = u[1:n_dof]
-    dx = u[(n_dof + 1):(n_dof * 2)]
-    ss = u[(end - nₛₛ + 1):end]
+    x = u[1:n_dof] # position
+    dx = u[(n_dof + 1):(n_dof * 2)] # velocity
+    ss = u[(end - nₛₛ + 1):end] # state space vector
 
-    # d(SS vector) = dx = Ar * x + Br * velocity
-    #    CI kernel =  y = Cr * x + Dr * velocity
-    # rad_force         = Cr * u[7:12] + Dr * du[1:6]
-    rad_force = Cᵣ * ss + Dᵣ * dx
-    du_ss = Aᵣ * ss + Bᵣ * dx
+    # The general state space is defined such that:
+    #    dx = Aᵣ * x + Bᵣ * u
+    #     y = Cᵣ * x + Dᵣ * u
+    # Where:
+    #    x is the state vector (ss)
+    #    y is the output (radiation force)
+    #    u is the input (velocity)
+    Fᵣ = Cᵣ * ss + Dᵣ * dx
+    dss = Aᵣ * ss + Bᵣ * dx
 
-    excitation_force = calculate_excitation_force(t, excitation_coeff, wave)
-    ddx = inverse_mass * (-c * dx - k * x + excitation_force + constant_forces + rad_force)
-    return [u[(n_dof + 1):(n_dof * 2)]; ddx; du_ss] # dx, ddx, du_ss
+    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t) + Fᵣ
+    ddx = inverse_mass * Fₜₒₜₐₗ
+
+    return [dx; ddx; dss]
 end
 
-function hydrodynamic_solver(dx₀, x₀, ts, p)
+function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
+    # u₀ = [x₀, dx₀]
+    if method == :point
+        func = hydrodynamic_oscillator
+    elseif method == :cic
+        global velocity_history = zeros(1, size(p[2][6][1], 2), size(p[2][6][1], 3))
+        func = hydrodynamic_oscillator_cic
+    elseif method == :ss
+        func = hydrodynamic_oscillator_ss
+    else
+        throw(ArgumentError("method must be a Symbol with value :point, :cic, or :ss"))
+    end
+
+    dt = diff(ts[1:2])[1]
+    ode_prob = ODE.ODEProblem(func, u₀, ts[[1, end]], p)
+    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
+    return ode_sol
+end
+
+function hydrodynamic_solver_cic(u₀, ts, p)
+    # u₀ = [x₀, dx₀]
+    dt = diff(ts[1:2])[1]
+    global velocity_history = zeros(1, size(p[7][1], 2), size(p[7][1], 3))
+
+    ode_prob = ODE.SecondOrderODEProblem(
+        hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
+    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
+    return ode_sol
+end
+
+function hydrodynamic_solver_ss(u₀, ts, p)
+    # u₀ = [x₀, dx₀, states₀]
+    dt = diff(ts[1:2])[1]
+
+    ode_prob = ODE.ODEProblem(
+        hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
+    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
+    return ode_sol
+end
+
+function hydrodynamic_solver_2nd(dx₀, x₀, ts, p)
     dt = diff(ts[1:2])[1]
     ode_prob = ODE.SecondOrderODEProblem(
         hydrodynamic_oscillator, dx₀, x₀, ts[[1, end]], p)
@@ -91,21 +179,12 @@ function hydrodynamic_solver(dx₀, x₀, ts, p)
     return ode_sol
 end
 
-function hydrodynamic_solver_cic(dx₀, x₀, ts, p)
+function hydrodynamic_solver_cic_2nd(dx₀, x₀, ts, p)
     dt = diff(ts[1:2])[1]
 
     global velocity_history = zeros(1, size(p[7][1], 2), size(p[7][1], 3))
     ode_prob = ODE.SecondOrderODEProblem(
         hydrodynamic_oscillator_cic, dx₀, x₀, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_ss(u₀, ts, p)
-    dt = diff(ts[1:2])[1]
-    # u₀ = [x₀, dx₀, states₀]
-    ode_prob = ODE.ODEProblem(
-        hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
     ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end
