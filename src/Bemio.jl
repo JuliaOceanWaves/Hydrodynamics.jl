@@ -64,7 +64,7 @@ function read_capytaine(filename::String)::Hydro
 end
 
 function radiation_irf(
-        rd_raw::Array, w_raw::Vector; w_max::Float64 = 20.0, t_f = 60, dt::Float64 = 0.01)
+        rd_raw::Array, w_raw::Vector; w_max = 20.0, t = collect(0:0.1:60)')
     # cut off at the frequency limit
     i_w_end = argmin(abs.(w_raw .- w_max))
     w = w_raw[1:i_w_end]
@@ -72,7 +72,7 @@ function radiation_irf(
     nw = length(w)
 
     # timeseries array
-    t = collect(0:dt:t_f)'
+    # t = collect(0:dt:t_f)'
     nt = length(t)
 
     # Reshape arrays to enable element-wise multiplication without loops and overwriting initialized arrays
