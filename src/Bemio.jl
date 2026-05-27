@@ -1,8 +1,6 @@
 module Bemio
 
-import NCDatasets
 import NetCDF
-import Integrals
 using Statistics
 import LinearAlgebra
 import ToeplitzMatrices

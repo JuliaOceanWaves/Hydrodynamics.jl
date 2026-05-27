@@ -1,5 +1,4 @@
 import OrdinaryDiffEq as ODE
-import SciMLSensitivity as SMS # required for Zygote's reverse AD
 
 global velocity_history
 
