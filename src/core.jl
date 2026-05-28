@@ -2,11 +2,37 @@ import OrdinaryDiffEq as ODE
 
 global velocity_history
 
+function _collect_real_eltypes!(types, x)
+    if x isa Real
+        push!(types, typeof(x))
+    elseif x isa AbstractArray
+        if eltype(x) <: Real
+            push!(types, eltype(x))
+        else
+            foreach(value -> _collect_real_eltypes!(types, value), x)
+        end
+    elseif x isa Tuple || x isa NamedTuple
+        foreach(value -> _collect_real_eltypes!(types, value), x)
+    end
+    return types
+end
+
+function _real_eltype(args...)
+    types = DataType[]
+    for arg in args
+        _collect_real_eltypes!(types, arg)
+    end
+    if isempty(types)
+        return Float64
+    end
+    return reduce(promote_type, types)
+end
+
 function ramp_function(start_time, ramp_time, current_time)
     if current_time < start_time
-        ramp = 0.0
+        ramp = zero(current_time)
     elseif current_time >= ramp_time
-        ramp = 1.0
+        ramp = one(current_time)
     else
         ramp = 0.5 * (1 + cos(pi + pi .* current_time ./ ramp_time))
     end
@@ -132,10 +158,12 @@ end
 
 function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     # u₀ = [x₀, dx₀]
+    T = _real_eltype(u₀, p)
+    u0 = T === eltype(u₀) ? u₀ : convert.(T, u₀)
     if method == :point
         func = hydrodynamic_oscillator
     elseif method == :cic
-        global velocity_history = zeros(1, size(p[2][6][1], 2), size(p[2][6][1], 3))
+        global velocity_history = zeros(T, 1, size(p[2][6][1], 2), size(p[2][6][1], 3))
         func = hydrodynamic_oscillator_cic
     elseif method == :ss
         func = hydrodynamic_oscillator_ss
@@ -144,46 +172,52 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     end
 
     dt = diff(ts[1:2])[1]
-    ode_prob = ODE.ODEProblem(func, u₀, ts[[1, end]], p)
+    ode_prob = ODE.ODEProblem(func, u0, ts[[1, end]], p)
     ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end
 
 function hydrodynamic_solver_cic(u₀, ts, p)
-    # u₀ = [x₀, dx₀]
+    T = _real_eltype(u₀, p)
+    u0 = T === eltype(u₀) ? u₀ : convert.(T, u₀)
     dt = diff(ts[1:2])[1]
-    global velocity_history = zeros(1, size(p[7][1], 2), size(p[7][1], 3))
+    global velocity_history = zeros(T, 1, size(p[2][6][1], 2), size(p[2][6][1], 3))
 
-    ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
+    ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_cic, u0, ts[[1, end]], p)
     ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end
 
 function hydrodynamic_solver_ss(u₀, ts, p)
-    # u₀ = [x₀, dx₀, states₀]
+    T = _real_eltype(u₀, p)
+    u0 = T === eltype(u₀) ? u₀ : convert.(T, u₀)
     dt = diff(ts[1:2])[1]
 
-    ode_prob = ODE.ODEProblem(
-        hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
+    ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_ss, u0, ts[[1, end]], p)
     ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end
 
 function hydrodynamic_solver_2nd(dx₀, x₀, ts, p)
+    T = _real_eltype(dx₀, x₀, p)
+    dx0 = T === eltype(dx₀) ? dx₀ : convert.(T, dx₀)
+    x0 = T === eltype(x₀) ? x₀ : convert.(T, x₀)
     dt = diff(ts[1:2])[1]
     ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator, dx₀, x₀, ts[[1, end]], p)
+        hydrodynamic_oscillator, dx0, x0, ts[[1, end]], p)
     ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end
 
 function hydrodynamic_solver_cic_2nd(dx₀, x₀, ts, p)
     dt = diff(ts[1:2])[1]
+    T = _real_eltype(dx₀, x₀, p)
+    dx0 = T === eltype(dx₀) ? dx₀ : convert.(T, dx₀)
+    x0 = T === eltype(x₀) ? x₀ : convert.(T, x₀)
 
-    global velocity_history = zeros(1, size(p[7][1], 2), size(p[7][1], 3))
+    global velocity_history = zeros(T, 1, size(p[2][6][1], 2), size(p[2][6][1], 3))
     ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator_cic, dx₀, x₀, ts[[1, end]], p)
+        hydrodynamic_oscillator_cic, dx0, x0, ts[[1, end]], p)
     ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end
