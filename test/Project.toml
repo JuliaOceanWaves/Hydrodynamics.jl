@@ -16,5 +16,5 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WaveSpectra = "9da5bd80-4f3d-48a2-a37e-447dff2ef7bc"
 
 [sources]
-DimensionfulAngles = {path = "../../DimensionfulAngles.jl"}
-WaveSpectra = {path = "../../WaveSpectra.jl"}
+DimensionfulAngles = {url = "https://github.com/JuliaOceanWaves/DimensionfulAngles.jl.git", rev = "e64defe0cb09b50e9ec4820aa6cf19cebbf9d85c"}
+WaveSpectra = {url = "https://github.com/JuliaOceanWaves/WaveSpectra.jl.git", rev = "d99302ead1d44d9254669d9233a674bcb3f4e9b4"}
