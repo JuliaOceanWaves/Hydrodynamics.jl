@@ -118,6 +118,7 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
     end
 
     for i in axes(Kᵣ, 1), j in axes(Kᵣ, 2)
+
         irf_K = Kᵣ[i, j, :]
         R2i = LinearAlgebra.norm(irf_K .- mean(irf_K))
         y = dt .* irf_K
@@ -191,6 +192,7 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
 
     order_count = 1
     for i in axes(ss_A_by_dof, 1), j in axes(ss_A_by_dof, 2)
+
         order = ss_order_by_dof[i, j]
         o1 = order_count
         o2 = order_count + order - 1
@@ -234,7 +236,12 @@ function radiation_state_space(Kᵣ, tᵣ, max_order = 10, R2t = 0.95;
     end
 
     if isnothing(orders)
-        _, _, _, _, _, _, ss_order_by_dof = _radiation_state_space_realization(
+        _, _,
+        _,
+        _,
+        _,
+        _,
+        ss_order_by_dof = _radiation_state_space_realization(
             K_values_primal, t_values_primal, max_order, R2t; verbose)
     else
         ss_order_by_dof = Int64.(orders)
@@ -246,7 +253,12 @@ function radiation_state_space(Kᵣ, tᵣ, max_order = 10, R2t = 0.95;
     flat = ImplicitAD.provide_rule(
         function (x, p)
             dims, t_values, max_order, R2t, fixed_orders = p
-            ss_A, ss_B, ss_C, ss_D, ss_K, ss_R2, _ = _radiation_state_space_realization(
+            ss_A, ss_B,
+            ss_C,
+            ss_D,
+            ss_K,
+            ss_R2,
+            _ = _radiation_state_space_realization(
                 reshape(x, dims), t_values, max_order, R2t;
                 orders = fixed_orders, verbose = false)
             return vcat(vec(ss_A), vec(ss_B), vec(ss_C), vec(ss_D), vec(ss_K), vec(ss_R2))

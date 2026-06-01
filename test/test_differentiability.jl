@@ -28,7 +28,7 @@ function state_space_parameters(theta)
         reshape([theta[12]], 1, 1),
         reshape([theta[13]], 1, 1),
         reshape([theta[14]], 1, 1),
-        1,
+        1
     )
     return (inverse_mass, (K_hs, B, excitation_coeff, F, wave, state_space), pto, mooring)
 end
@@ -105,13 +105,23 @@ end
     t = reshape(collect(0.0:0.2:1.0), 1, 1, 6)
     theta = exp.(-vec(t))
 
-    _, _, _, _, _, _, orders = Hydrodynamics.Bemio.radiation_state_space(
+    _, _,
+    _,
+    _,
+    _,
+    _,
+    orders = Hydrodynamics.Bemio.radiation_state_space(
         reshape(theta, 1, 1, 6), t, 2, -Inf; verbose = false)
     @test orders == reshape([1], 1, 1)
 
     state_space_response(theta) = begin
         K = reshape(theta, 1, 1, 6)
-        A, B, C, D, Kss, R2, _ = Hydrodynamics.Bemio.radiation_state_space(
+        A, B,
+        C,
+        D,
+        Kss,
+        R2,
+        _ = Hydrodynamics.Bemio.radiation_state_space(
             K, t, 2, 0.95; orders = reshape([1], 1, 1), verbose = false)
         sum(A) + sum(B) + sum(C) + sum(D) + 0.1 * sum(Kss) + sum(R2)
     end
