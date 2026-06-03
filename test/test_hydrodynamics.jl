@@ -38,7 +38,8 @@ end
 end
 
 @testset "Capytaine reader" begin
-    hydro = Hydrodynamics.Bemio.read_capytaine(joinpath(@__DIR__, "..", "examples", "data", "rm3.nc"))
+    hydro = Hydrodynamics.Bemio.read_capytaine(joinpath(
+        @__DIR__, "..", "examples", "data", "rm3.nc"))
     @test length(hydro.w) > 0
     @test length(hydro.period) == length(hydro.w)
     @test size(hydro.ex, 1) > 0

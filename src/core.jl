@@ -22,7 +22,8 @@ function calculate_excitation_force(current_time, excitation_coeff, wave)
     ramp = ramp_function(start_time, ramp_time, current_time)
     exponential_term = ov .* current_time .+ p
     force = ramp .* (excitation_coeff[:, :, :, 1] .* cos.(exponential_term) -
-             excitation_coeff[:, :, :, 2] .* sin.(exponential_term)) .* sqrt.(2 * s .* dFrequency)
+             excitation_coeff[:, :, :, 2] .* sin.(exponential_term)) .*
+            sqrt.(2 * s .* dFrequency)
 
     weights = ones(size(force, 3))
     return force[:, 1, :] * weights
