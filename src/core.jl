@@ -40,17 +40,22 @@ function calculate_radiation_force(dx, B)
     return -B * dx
 end
 
+function init_velocity_history(n_dof, n_time_steps)
+    global velocity_history = zeros(1, n_dof, n_time_steps)
+end
+
 function calculate_ci_force(dx, cic)
     # Convolution integrals
     Kᵣ, tᵣ = cic
-    global velocity_history = circshift(velocity_history, 1)
-    global velocity_history[1, :, 1] = dx
+    global velocity_history
+    velocity_history .= circshift(velocity_history, (0, 0, 1))
+    velocity_history[1, :, 1] = dx
     integrand = sum(Kᵣ .* velocity_history; dims = [2])[:, 1, :] # nDOF, nDOF, nt --> nDOF, nt
     dt = diff(tᵣ; dims = 3)[:, 1, :] # 1, nt-1
     radiation_force = sum(
         (integrand[:, 1:(end - 1)] .+ integrand[:, 2:end]) .* 0.5 .* dt;
         dims = [2])[:, 1] # nDOF
-    return radiation_force
+    return -radiation_force
 end
 
 function calculate_added_mass_force(ddx, A)
@@ -125,7 +130,7 @@ function hydrodynamic_oscillator_ss(u, p, t)
     Fᵣ = Cᵣ * ss + Dᵣ * dx
     dss = Aᵣ * ss + Bᵣ * dx
 
-    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t) + Fᵣ
+    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t) - Fᵣ
     ddx = inverse_mass * Fₜₒₜₐₗ
 
     return [dx; ddx; dss]
@@ -136,7 +141,7 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     if method == :point
         func = hydrodynamic_oscillator
     elseif method == :cic
-        global velocity_history = zeros(1, size(p[2][6][1], 2), size(p[2][6][1], 3))
+        init_velocity_history(size(p[2][6][1], 2), size(p[2][6][1], 3))
         func = hydrodynamic_oscillator_cic
     elseif method == :ss
         func = hydrodynamic_oscillator_ss
@@ -175,16 +180,6 @@ function hydrodynamic_solver_2nd(dx₀, x₀, ts, p)
     dt = diff(ts[1:2])[1]
     ode_prob = ODE.SecondOrderODEProblem(
         hydrodynamic_oscillator, dx₀, x₀, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_cic_2nd(dx₀, x₀, ts, p)
-    dt = diff(ts[1:2])[1]
-
-    global velocity_history = zeros(1, size(p[7][1], 2), size(p[7][1], 3))
-    ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator_cic, dx₀, x₀, ts[[1, end]], p)
     ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end

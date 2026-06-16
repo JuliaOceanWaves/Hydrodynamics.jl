@@ -72,7 +72,6 @@ function radiation_irf(
     nw = length(w)
 
     # timeseries array
-    # t = collect(0:dt:t_f)'
     nt = length(t)
 
     # Reshape arrays to enable element-wise multiplication without loops and overwriting initialized arrays
