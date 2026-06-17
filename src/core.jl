@@ -138,20 +138,24 @@ end
 
 function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     # u₀ = [x₀, dx₀]
+    dt = diff(ts[1:2])[1]
+
     if method == :point
-        func = hydrodynamic_oscillator
+        ode_prob = ODE.ODEProblem(hydrodynamic_oscillator, u₀, ts[[1, end]], p)
+        ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
+
     elseif method == :cic
         init_velocity_history(size(p[2][6][1], 2), size(p[2][6][1], 3))
-        func = hydrodynamic_oscillator_cic
+        ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
+        ode_sol = ODE.solve(ode_prob, ODE.Euler(), saveat = dt, adaptive = false, dt = dt)
+
     elseif method == :ss
-        func = hydrodynamic_oscillator_ss
+        ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
+        ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     else
         throw(ArgumentError("method must be a Symbol with value :point, :cic, or :ss"))
     end
 
-    dt = diff(ts[1:2])[1]
-    ode_prob = ODE.ODEProblem(func, u₀, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end
 
