@@ -4,13 +4,9 @@ import SciMLSensitivity as SMS # required for Zygote's reverse AD
 global velocity_history
 
 function ramp_function(start_time, ramp_time, current_time)
-    if current_time < start_time
-        ramp = 0.0
-    elseif current_time >= ramp_time
-        ramp = 1.0
-    else
-        ramp = 0.5 * (1 + cos(pi + pi .* current_time ./ ramp_time))
-    end
+    ramp = 0.0 * (current_time .< start_time) .+ 1.0 * (current_time .>= ramp_time) .+
+           0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time)) .*
+           (current_time .>= start_time .&& current_time .< ramp_time)
 end
 
 function calculate_excitation_force(current_time, excitation_coeff, wave)
