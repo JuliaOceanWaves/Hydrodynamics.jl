@@ -1,12 +1,21 @@
 import OrdinaryDiffEq as ODE
-import SciMLSensitivity as SMS # required for Zygote's reverse AD
+import SimpleDiffEq as SDE
+
+struct HydrodynamicSolution{TT, TX, TV}
+    t::TT
+    x::TX
+    dx::TV
+end
 
 global velocity_history
 
 function ramp_function(start_time, ramp_time, current_time)
-    ramp = 0.0 * (current_time .< start_time) .+ 1.0 * (current_time .>= ramp_time) .+
-           0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time)) .*
-           (current_time .>= start_time .&& current_time .< ramp_time)
+    if current_time <= start_time
+        return 0.0
+    elseif current_time >= ramp_time
+        return 1.0
+    end
+    return 0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time))
 end
 
 function calculate_excitation_force(current_time, excitation_coeff, wave)
@@ -23,9 +32,8 @@ function calculate_excitation_force(current_time, excitation_coeff, wave)
 
     # Format required for unitful input. `sum` doesn't play nice with matrices of mixed units and dimensions.
     # So instead multiply by an identity matrix to do the same summation in another way.
-    # return sum(force[:,:,:]; dims=[2,3])
-    o = ones(size(force, 3))
-    return force[:, 1, :] * o
+    weights = ones(size(force, 3))
+    return force[:, 1, :] * weights
 end
 
 function calculate_stiffness_force(x, Kₕₛ)
@@ -132,6 +140,21 @@ function hydrodynamic_oscillator_ss(u, p, t)
     return [dx; ddx; dss]
 end
 
+function hydrodynamic_stepping(dx0, x0, ts, p)
+    length(ts) >= 2 || throw(ArgumentError("time vector must contain at least two samples"))
+    x = [copy(x0) for _ in eachindex(ts)]
+    dx = [copy(dx0) for _ in eachindex(ts)]
+
+    for i in 1:(length(ts) - 1)
+        dt = ts[i + 1] - ts[i]
+        acceleration = hydrodynamic_oscillator([x[i]; dx[i]], p, ts[i])
+        dx[i + 1] = dx[i] + dt * acceleration
+        x[i + 1] = x[i] + dt * dx[i + 1]
+    end
+
+    return HydrodynamicSolution(ts, x, dx)
+end
+
 function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     # u₀ = [x₀, dx₀]
     dt = diff(ts[1:2])[1]
@@ -143,7 +166,8 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     elseif method == :cic
         init_velocity_history(size(p[2][6][1], 2), size(p[2][6][1], 3))
         ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
-        ode_sol = ODE.solve(ode_prob, ODE.Euler(), saveat = dt, adaptive = false, dt = dt)
+        ode_sol = ODE.solve(
+            ode_prob, SDE.SimpleEuler(), saveat = dt, adaptive = false, dt = dt)
 
     elseif method == :ss
         ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
@@ -152,34 +176,5 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
         throw(ArgumentError("method must be a Symbol with value :point, :cic, or :ss"))
     end
 
-    return ode_sol
-end
-
-function hydrodynamic_solver_cic(u₀, ts, p)
-    # u₀ = [x₀, dx₀]
-    dt = diff(ts[1:2])[1]
-    global velocity_history = zeros(1, size(p[7][1], 2), size(p[7][1], 3))
-
-    ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_ss(u₀, ts, p)
-    # u₀ = [x₀, dx₀, states₀]
-    dt = diff(ts[1:2])[1]
-
-    ode_prob = ODE.ODEProblem(
-        hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_2nd(dx₀, x₀, ts, p)
-    dt = diff(ts[1:2])[1]
-    ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator, dx₀, x₀, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end
