@@ -26,7 +26,12 @@ end
     c = reshape([0.2], 1, 1)
     inverse_mass = reshape([1.0], 1, 1)
     constant_forces = [0.0]
-    p = (k, c, inverse_mass, excitation_coeff, constant_forces, wave)
+
+    pto = ([0.0], [0.0], [0.0])
+    mooring = ([0.0], [0.0], [0.0])
+
+    hydro = (k, c, excitation_coeff, constant_forces, wave)
+    p = (k, c, inverse_mass, hydro, pto, mooring)
 
     ts = collect(0.0:0.1:0.3)
     sol = hydrodynamic_solver([0.0], [0.1], ts, p)
