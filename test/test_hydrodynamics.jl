@@ -53,7 +53,7 @@ end
     @test size(hydro.khs, 1) > 0
 end
 
-@testset "WEC-Sim validation" begin
+@testset "WEC-Sim verification" begin
     tol = 1e-6
     position_error = @nbinclude("..\\examples\\wec-sim_comparison_3dof.ipynb")
     last_result = [0.0163 0.0631; 0.8000 0.7200; 0.0033 0.0008]
@@ -61,4 +61,8 @@ end
     for idx in CartesianIndices(last_result)
         @test last_result[idx] < position_error[idx]
     end
+end
+
+@testset "AF verification" begin
+    # TODO
 end
