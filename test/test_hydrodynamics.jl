@@ -1,6 +1,7 @@
 using Hydrodynamics
 using Test
 using LinearAlgebra
+using NBInclude
 
 @testset "ramp function" begin
     @test ramp_function(1.0, 3.0, 0.5) == 0.0
@@ -50,4 +51,14 @@ end
     @test length(hydro.period) == length(hydro.w)
     @test size(hydro.ex, 1) > 0
     @test size(hydro.khs, 1) > 0
+end
+
+@testset "WEC-Sim validation" begin
+    tol = 1e-6
+    position_error = @nbinclude("..\\examples\\wec-sim_comparison_3dof.ipynb")
+    last_result = [0.0163 0.0631; 0.8000 0.7200; 0.0033 0.0008]
+    @test size(last_result) == size(position_error)
+    for idx in CartesianIndices(last_result)
+        @test last_result[idx] < position_error[idx]
+    end
 end
