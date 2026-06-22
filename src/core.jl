@@ -1,3 +1,5 @@
+import OrdinaryDiffEq as ODE
+
 struct HydrodynamicSolution{TT, TX, TV}
     t::TT
     x::TX
@@ -24,6 +26,8 @@ function calculate_excitation_force(current_time, excitation_coeff, wave)
              excitation_coeff[:, :, :, 2] .* sin.(exponential_term)) .*
             sqrt.(2 * s .* dFrequency)
 
+    # Format required for unitful input. `sum` doesn't play nice with matrices of mixed units and dimensions.
+    # So instead multiply by an identity matrix to do the same summation in another way.
     weights = ones(size(force, 3))
     return force[:, 1, :] * weights
 end
