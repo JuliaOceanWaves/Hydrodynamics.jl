@@ -143,7 +143,7 @@ function hydrodynamic_stepping(dx0, x0, ts, p)
 
     for i in 1:(length(ts) - 1)
         dt = ts[i + 1] - ts[i]
-        acceleration = hydrodynamic_oscillator(dx[i], x[i], p, ts[i])
+        acceleration = hydrodynamic_oscillator([x[i]; dx[i]], p, ts[i])
         dx[i + 1] = dx[i] + dt * acceleration
         x[i + 1] = x[i] + dt * dx[i + 1]
     end
