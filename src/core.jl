@@ -173,32 +173,3 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
 
     return ode_sol
 end
-
-function hydrodynamic_solver_cic(u₀, ts, p)
-    # u₀ = [x₀, dx₀]
-    dt = diff(ts[1:2])[1]
-    global velocity_history = zeros(1, size(p[7][1], 2), size(p[7][1], 3))
-
-    ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_ss(u₀, ts, p)
-    # u₀ = [x₀, dx₀, states₀]
-    dt = diff(ts[1:2])[1]
-
-    ode_prob = ODE.ODEProblem(
-        hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_2nd(dx₀, x₀, ts, p)
-    dt = diff(ts[1:2])[1]
-    ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator, dx₀, x₀, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
