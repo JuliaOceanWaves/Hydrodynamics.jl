@@ -1,4 +1,5 @@
 import OrdinaryDiffEq as ODE
+import SimpleDiffEq as SDE
 
 struct HydrodynamicSolution{TT, TX, TV}
     t::TT
@@ -162,7 +163,8 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     elseif method == :cic
         init_velocity_history(size(p[2][6][1], 2), size(p[2][6][1], 3))
         ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
-        ode_sol = ODE.solve(ode_prob, ODE.Euler(), saveat = dt, adaptive = false, dt = dt)
+        ode_sol = ODE.solve(
+            ode_prob, SDE.SimpleEuler(), saveat = dt, adaptive = false, dt = dt)
 
     elseif method == :ss
         ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
