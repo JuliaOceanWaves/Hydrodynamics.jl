@@ -1,5 +1,6 @@
 using Hydrodynamics
 using Test
+using LinearAlgebra
 
 @testset "ramp function" begin
     @test ramp_function(1.0, 3.0, 0.5) == 0.0
@@ -22,24 +23,24 @@ end
     @test size(force) == (1,)
     @test isfinite(force[1])
 
-    k = reshape([2.0], 1, 1)
-    c = reshape([0.2], 1, 1)
-    inverse_mass = reshape([1.0], 1, 1)
+    k = 2.0 * ones(1, 1)
+    c = 0.2 * ones(1, 1)
+    inverse_mass = 1.0 * ones(1, 1)
     constant_forces = [0.0]
 
-    pto = ([0.0], [0.0], [0.0])
-    mooring = ([0.0], [0.0], [0.0])
+    pto = ([0.0], 0*k, 0*c)
+    mooring = ([0.0], 0*k, 0*c)
 
     hydro = (k, c, excitation_coeff, constant_forces, wave)
-    p = (k, c, inverse_mass, hydro, pto, mooring)
+    p = (inverse_mass, hydro, pto, mooring)
 
     ts = collect(0.0:0.1:0.3)
-    sol = hydrodynamic_solver([0.0], [0.1], ts, p)
+    sol = hydrodynamic_solver([0.0; 0.1], ts, p, method = :point)
     @test sol.t == ts
-    @test length(sol.x) == length(ts)
-    @test length(sol.dx) == length(ts)
-    @test all(v -> length(v) == 1 && isfinite(v[1]), sol.x)
-    @test all(v -> length(v) == 1 && isfinite(v[1]), sol.dx)
+    @test length(sol[1, :]) == length(ts)
+    @test length(sol[2, :]) == length(ts)
+    @test all(isfinite.(sol[1, :]))
+    @test all(isfinite.(sol[2, :]))
 end
 
 @testset "Capytaine reader" begin
