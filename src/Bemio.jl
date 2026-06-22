@@ -28,10 +28,6 @@ struct Hydro
 end
 
 function read_capytaine(filename::String)::Hydro
-
-    # info = NetCDF.ncinfo(filename);
-    # ds = NCDataset(filename,"r")
-
     radiating_dof = NetCDF.ncread(filename, "radiating_dof")
     influenced_dof = NetCDF.ncread(filename, "influenced_dof")
     g = NetCDF.ncread(filename, "g")
@@ -172,8 +168,8 @@ function radiation_state_space(Kᵣ, tᵣ, max_order = 10, R2t = 0.95)
             o1 = order_count
             o2 = ss_order_by_dof[i, j] + order_count - 1
             ss_A[o1:o2, o1:o2] = ss_A_by_dof[
-            i, j, 1:ss_order_by_dof[i, j], 1:ss_order_by_dof[
-                i, j]]
+                i, j, 1:ss_order_by_dof[i, j], 1:ss_order_by_dof[
+                    i, j]]
             ss_B[o1:o2, j] = ss_B_by_dof[i, j, 1:ss_order_by_dof[i, j], 1]
             ss_C[i, o1:o2] = ss_C_by_dof[i, j, 1, 1:ss_order_by_dof[i, j]]
             order_count = o2 + 1

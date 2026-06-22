@@ -10,9 +10,12 @@ end
 global velocity_history
 
 function ramp_function(start_time, ramp_time, current_time)
-    ramp = 0.0 * (current_time .< start_time) .+ 1.0 * (current_time .>= ramp_time) .+
-           0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time)) .*
-           (current_time .>= start_time .&& current_time .< ramp_time)
+    if current_time <= start_time
+        return 0.0
+    elseif current_time >= ramp_time
+        return 1.0
+    end
+    return 0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time))
 end
 
 function calculate_excitation_force(current_time, excitation_coeff, wave)
