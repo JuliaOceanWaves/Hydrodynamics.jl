@@ -1,12 +1,16 @@
 import OrdinaryDiffEq as ODE
-import SciMLSensitivity as SMS # required for Zygote's reverse AD
 
 global velocity_history
 
 function ramp_function(start_time, ramp_time, current_time)
-    ramp = 0.0 * (current_time .< start_time) .+ 1.0 * (current_time .>= ramp_time) .+
-           0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time)) .*
-           (current_time .>= start_time .&& current_time .< ramp_time)
+    if !isfinite(current_time)
+        return current_time > zero(current_time) ? one(current_time) : zero(current_time)
+    elseif current_time < start_time
+        return zero(current_time)
+    elseif current_time >= ramp_time || ramp_time <= start_time
+        return one(current_time)
+    end
+    return 0.5 * (one(current_time) + cos(pi + pi * current_time / ramp_time))
 end
 
 function calculate_excitation_force(current_time, excitation_coeff, wave)
@@ -36,14 +40,25 @@ function calculate_radiation_force(dx, B)
     return -B * dx
 end
 
-function init_velocity_history(n_dof, n_time_steps)
-    global velocity_history = zeros(1, n_dof, n_time_steps)
+function init_velocity_history(n_dof, n_time_steps, ::Type{T} = Float64) where {T}
+    global velocity_history = zeros(T, 1, n_dof, n_time_steps)
+end
+
+function promote_velocity_history!(::Type{T}) where {T}
+    global velocity_history
+    target_eltype = promote_type(eltype(velocity_history), T)
+    if target_eltype !== eltype(velocity_history)
+        promoted_history = similar(velocity_history, target_eltype)
+        promoted_history .= velocity_history
+        velocity_history = promoted_history
+    end
 end
 
 function calculate_ci_force(dx, cic)
     # Convolution integrals
     Kᵣ, tᵣ = cic
     global velocity_history
+    promote_velocity_history!(eltype(dx))
     velocity_history .= circshift(velocity_history, (0, 0, 1))
     velocity_history[1, :, 1] = dx
     integrand = sum(Kᵣ .* velocity_history; dims = [2])[:, 1, :] # nDOF, nDOF, nt --> nDOF, nt
