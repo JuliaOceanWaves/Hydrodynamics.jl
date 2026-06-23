@@ -60,7 +60,7 @@ end
     last_result = [0.0163 0.0631; 0.8000 0.7200; 0.0033 0.0008]
     @test size(last_result) == size(position_error)
     for idx in CartesianIndices(last_result)
-        @test last_result[idx] < position_error[idx]
+        @test position_error[idx] < last_result[idx]
     end
 end
 
