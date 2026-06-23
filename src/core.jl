@@ -37,9 +37,9 @@ end
 
 function ramp_function(start_time, ramp_time, current_time)
     if current_time <= start_time
-        return zero(current_time)
+        return 0.0
     elseif current_time >= ramp_time
-        return one(current_time)
+        return 1.0
     end
     return 0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time))
 end
