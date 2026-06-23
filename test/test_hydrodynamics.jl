@@ -53,7 +53,8 @@ end
 end
 
 @testset "WEC-Sim verification" begin
-    position_error = @nbinclude("..\\examples\\wec-sim_comparison_3dof.ipynb")
+    file = joinpath(@__DIR__, "..", "examples", "wec-sim_comparison_3dof.ipynb")
+    position_error = @nbinclude(file)
     # accuracy of the verification to wec-sim when the notebook was first created. 
     # last_result is the RMSE of position in [surge, heave, pitch] dofs x [cic, ss] methods
     last_result = [0.0163 0.0631; 0.8000 0.7200; 0.0033 0.0008]
@@ -66,6 +67,7 @@ end
 @testset "AF verification" begin
     # TODO - use power performance notebook to confirm gradients are functional
     last_result = 0.051
-    mae = @nbinclude("..\\examples\\wec-sim_comparison_3dof.ipynb")
+    file = joinpath(@__DIR__, "..", "examples", "power_performance.ipynb")
+    mae = @nbinclude(file)
     @test mae < last_result
 end
