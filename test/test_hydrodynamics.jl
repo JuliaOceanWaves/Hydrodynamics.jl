@@ -53,8 +53,9 @@ end
 end
 
 @testset "WEC-Sim verification" begin
-    tol = 1e-6
     position_error = @nbinclude("..\\examples\\wec-sim_comparison_3dof.ipynb")
+    # accuracy of the verification to wec-sim when the notebook was first created. 
+    # last_result is the RMSE of position in [surge, heave, pitch] dofs x [cic, ss] methods
     last_result = [0.0163 0.0631; 0.8000 0.7200; 0.0033 0.0008]
     @test size(last_result) == size(position_error)
     for idx in CartesianIndices(last_result)
@@ -63,5 +64,8 @@ end
 end
 
 @testset "AF verification" begin
-    # TODO
+    # TODO - use power performance notebook to confirm gradients are functional
+    last_result = 0.051
+    mae = @nbinclude("..\\examples\\wec-sim_comparison_3dof.ipynb")
+    @test mae < last_result
 end

@@ -5,6 +5,7 @@ authors = ["Sandia National Laboratories"]
 
 [deps]
 ExponentialUtilities = "d4d017d3-3776-5f7e-afef-a10c40355c18"
+FiniteDiff = "6a86dc24-6348-571c-b903-95158fe2bd41"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NetCDF = "30363a11-5582-574a-97bb-aa9a979735b9"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
@@ -15,6 +16,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
 [compat]
 ExponentialUtilities = "1.30.0"
+FiniteDiff = "2.31.0"
 LinearAlgebra = "1.12.0"
 NetCDF = "0.12.2"
 OrdinaryDiffEq = "7.0.1"
