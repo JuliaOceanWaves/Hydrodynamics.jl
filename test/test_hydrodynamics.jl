@@ -1,6 +1,5 @@
 using Hydrodynamics
 using Test
-using LinearAlgebra
 using NBInclude
 
 @testset "ramp function" begin
