@@ -14,6 +14,7 @@ SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WaveSpectra = "9da5bd80-4f3d-48a2-a37e-447dff2ef7bc"
+Hydrodynamics = "63c6a582-8669-4cdf-95d2-d1c53f837950"
 
 [sources]
 DimensionfulAngles = {url = "https://github.com/JuliaOceanWaves/DimensionfulAngles.jl.git", rev = "e64defe0cb09b50e9ec4820aa6cf19cebbf9d85c"}

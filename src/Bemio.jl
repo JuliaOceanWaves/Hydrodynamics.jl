@@ -1,12 +1,12 @@
 module Bemio
 
-import NetCDF
-using Statistics
+using ExponentialUtilities
 import ForwardDiff
 import ImplicitAD
 import LinearAlgebra
+import NetCDF
+using Statistics
 import ToeplitzMatrices
-using ExponentialUtilities
 import Unitful
 
 struct Hydro
@@ -30,10 +30,6 @@ struct Hydro
 end
 
 function read_capytaine(filename::String)::Hydro
-
-    # info = NetCDF.ncinfo(filename);
-    # ds = NCDataset(filename,"r")
-
     radiating_dof = NetCDF.ncread(filename, "radiating_dof")
     influenced_dof = NetCDF.ncread(filename, "influenced_dof")
     g = NetCDF.ncread(filename, "g")
@@ -72,7 +68,6 @@ function radiation_irf(
     nw = length(w)
 
     # timeseries array
-    # t = collect(0:dt:t_f)'
     nt = length(t)
 
     # Reshape arrays to enable element-wise multiplication without loops and overwriting initialized arrays
@@ -95,15 +90,15 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
 
     dt = tᵣ[2] - tᵣ[1]
     n_time = size(Kᵣ, 3)
-    fit_order_limit = min(max_order, n_time - 2)
-    if fit_order_limit < 1
-        throw(ArgumentError("radiation_state_space requires at least three IRF time samples"))
+    if n_time < max_order + 2
+        throw(ArgumentError("radiation_state_space requires at least " *
+                            string(max_order+2) * " IRF time samples"))
     end
 
     T = eltype(Kᵣ)
-    ss_A_by_dof = zeros(T, size(Kᵣ, 1), size(Kᵣ, 2), fit_order_limit, fit_order_limit)
-    ss_B_by_dof = zeros(T, size(Kᵣ, 1), size(Kᵣ, 2), fit_order_limit, 1)
-    ss_C_by_dof = zeros(T, size(Kᵣ, 1), size(Kᵣ, 2), 1, fit_order_limit)
+    ss_A_by_dof = zeros(T, size(Kᵣ, 1), size(Kᵣ, 2), max_order, max_order)
+    ss_B_by_dof = zeros(T, size(Kᵣ, 1), size(Kᵣ, 2), max_order, 1)
+    ss_C_by_dof = zeros(T, size(Kᵣ, 1), size(Kᵣ, 2), 1, max_order)
     ss_D_by_dof = zeros(T, size(Kᵣ)[1:2])
     ss_K_by_dof = zeros(T, size(Kᵣ)[1:3])
     ss_R2_by_dof = zeros(T, size(Kᵣ)[1:2])
@@ -113,12 +108,14 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
     end
 
     if !isnothing(orders) && (any(ss_order_by_dof .< 1) ||
-        any(ss_order_by_dof .> fit_order_limit))
+        any(ss_order_by_dof .> max_order))
         throw(ArgumentError("orders must be between 1 and min(max_order, length(t)-2)"))
     end
 
+    print("State space calculation:")
     for i in axes(Kᵣ, 1), j in axes(Kᵣ, 2)
 
+        print("dof: ", i, ", ", j, " complete.")
         irf_K = Kᵣ[i, j, :]
         R2i = LinearAlgebra.norm(irf_K .- mean(irf_K))
         y = dt .* irf_K
@@ -126,7 +123,7 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
         h = ToeplitzMatrices.Hankel([y[2:end]; zeros(T, n - 1)], (n - 1, n - 1))
         u, svh, v = LinearAlgebra.svd(h)
 
-        order_range = isnothing(orders) ? (1:fit_order_limit) :
+        order_range = isnothing(orders) ? (1:max_order) :
                       (ss_order_by_dof[i, j]:ss_order_by_dof[i, j])
         order = last(order_range)
         R2 = zero(T)
@@ -152,7 +149,8 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
             solve_matrix = dt / 2 * (eye + a)
             ac_transpose = similar(a)
             for col in 1:order
-                ac_transpose[:, col] = ImplicitAD.implicit_linear(
+                ac_transpose[
+                    :, col] = ImplicitAD.implicit_linear(
                     transpose(solve_matrix), collect(transpose(a - eye)[:, col]))
             end
             ac = transpose(ac_transpose)

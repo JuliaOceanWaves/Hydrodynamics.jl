@@ -1,4 +1,11 @@
 import OrdinaryDiffEq as ODE
+import SimpleDiffEq as SDE
+
+struct HydrodynamicSolution{TT, TX, TV}
+    t::TT
+    x::TX
+    dx::TV
+end
 
 global velocity_history
 
@@ -29,13 +36,12 @@ function _real_eltype(args...)
 end
 
 function ramp_function(start_time, ramp_time, current_time)
-    if current_time < start_time
-        ramp = zero(current_time)
+    if current_time <= start_time
+        return zero(current_time)
     elseif current_time >= ramp_time
-        ramp = one(current_time)
-    else
-        ramp = 0.5 * (1 + cos(pi + pi .* current_time ./ ramp_time))
+        return one(current_time)
     end
+    return 0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time))
 end
 
 function calculate_excitation_force(current_time, excitation_coeff, wave)
@@ -52,9 +58,8 @@ function calculate_excitation_force(current_time, excitation_coeff, wave)
 
     # Format required for unitful input. `sum` doesn't play nice with matrices of mixed units and dimensions.
     # So instead multiply by an identity matrix to do the same summation in another way.
-    # return sum(force[:,:,:]; dims=[2,3])
-    o = ones(size(force, 3))
-    return force[:, 1, :] * o
+    weights = ones(size(force, 3))
+    return force[:, 1, :] * weights
 end
 
 function calculate_stiffness_force(x, Kₕₛ)
@@ -65,17 +70,22 @@ function calculate_radiation_force(dx, B)
     return -B * dx
 end
 
+function init_velocity_history(T, n_dof, n_time_steps)
+    global velocity_history = zeros(T, 1, n_dof, n_time_steps)
+end
+
 function calculate_ci_force(dx, cic)
     # Convolution integrals
     Kᵣ, tᵣ = cic
-    global velocity_history = circshift(velocity_history, 1)
-    global velocity_history[1, :, 1] = dx
+    global velocity_history
+    velocity_history .= circshift(velocity_history, (0, 0, 1))
+    velocity_history[1, :, 1] = dx
     integrand = sum(Kᵣ .* velocity_history; dims = [2])[:, 1, :] # nDOF, nDOF, nt --> nDOF, nt
     dt = diff(tᵣ; dims = 3)[:, 1, :] # 1, nt-1
     radiation_force = sum(
         (integrand[:, 1:(end - 1)] .+ integrand[:, 2:end]) .* 0.5 .* dt;
         dims = [2])[:, 1] # nDOF
-    return radiation_force
+    return -radiation_force
 end
 
 function calculate_added_mass_force(ddx, A)
@@ -150,74 +160,49 @@ function hydrodynamic_oscillator_ss(u, p, t)
     Fᵣ = Cᵣ * ss + Dᵣ * dx
     dss = Aᵣ * ss + Bᵣ * dx
 
-    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t) + Fᵣ
+    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t) - Fᵣ
     ddx = inverse_mass * Fₜₒₜₐₗ
 
     return [dx; ddx; dss]
 end
 
+function hydrodynamic_stepping(dx0, x0, ts, p)
+    length(ts) >= 2 || throw(ArgumentError("time vector must contain at least two samples"))
+    x = [copy(x0) for _ in eachindex(ts)]
+    dx = [copy(dx0) for _ in eachindex(ts)]
+
+    for i in 1:(length(ts) - 1)
+        dt = ts[i + 1] - ts[i]
+        acceleration = hydrodynamic_oscillator([x[i]; dx[i]], p, ts[i])
+        dx[i + 1] = dx[i] + dt * acceleration
+        x[i + 1] = x[i] + dt * dx[i + 1]
+    end
+
+    return HydrodynamicSolution(ts, x, dx)
+end
+
 function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     # u₀ = [x₀, dx₀]
     T = _real_eltype(u₀, p)
-    u0 = T === eltype(u₀) ? u₀ : convert.(T, u₀)
+    u₀ = T === eltype(u₀) ? u₀ : convert.(T, u₀)
+    dt = diff(ts[1:2])[1]
+
     if method == :point
-        func = hydrodynamic_oscillator
+        ode_prob = ODE.ODEProblem(hydrodynamic_oscillator, u₀, ts[[1, end]], p)
+        ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
+
     elseif method == :cic
-        global velocity_history = zeros(T, 1, size(p[2][6][1], 2), size(p[2][6][1], 3))
-        func = hydrodynamic_oscillator_cic
+        init_velocity_history(T, size(p[2][6][1], 2), size(p[2][6][1], 3))
+        ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
+        ode_sol = ODE.solve(
+            ode_prob, SDE.SimpleEuler(), saveat = dt, adaptive = false, dt = dt)
+
     elseif method == :ss
-        func = hydrodynamic_oscillator_ss
+        ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
+        ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     else
         throw(ArgumentError("method must be a Symbol with value :point, :cic, or :ss"))
     end
 
-    dt = diff(ts[1:2])[1]
-    ode_prob = ODE.ODEProblem(func, u0, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_cic(u₀, ts, p)
-    T = _real_eltype(u₀, p)
-    u0 = T === eltype(u₀) ? u₀ : convert.(T, u₀)
-    dt = diff(ts[1:2])[1]
-    global velocity_history = zeros(T, 1, size(p[2][6][1], 2), size(p[2][6][1], 3))
-
-    ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_cic, u0, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_ss(u₀, ts, p)
-    T = _real_eltype(u₀, p)
-    u0 = T === eltype(u₀) ? u₀ : convert.(T, u₀)
-    dt = diff(ts[1:2])[1]
-
-    ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_ss, u0, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_2nd(dx₀, x₀, ts, p)
-    T = _real_eltype(dx₀, x₀, p)
-    dx0 = T === eltype(dx₀) ? dx₀ : convert.(T, dx₀)
-    x0 = T === eltype(x₀) ? x₀ : convert.(T, x₀)
-    dt = diff(ts[1:2])[1]
-    ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator, dx0, x0, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
-    return ode_sol
-end
-
-function hydrodynamic_solver_cic_2nd(dx₀, x₀, ts, p)
-    dt = diff(ts[1:2])[1]
-    T = _real_eltype(dx₀, x₀, p)
-    dx0 = T === eltype(dx₀) ? dx₀ : convert.(T, dx₀)
-    x0 = T === eltype(x₀) ? x₀ : convert.(T, x₀)
-
-    global velocity_history = zeros(T, 1, size(p[2][6][1], 2), size(p[2][6][1], 3))
-    ode_prob = ODE.SecondOrderODEProblem(
-        hydrodynamic_oscillator_cic, dx0, x0, ts[[1, end]], p)
-    ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
     return ode_sol
 end
