@@ -17,5 +17,5 @@ WaveSpectra = "9da5bd80-4f3d-48a2-a37e-447dff2ef7bc"
 Hydrodynamics = "63c6a582-8669-4cdf-95d2-d1c53f837950"
 
 [sources]
-DimensionfulAngles = {url = "https://github.com/JuliaOceanWaves/DimensionfulAngles.jl.git", rev = "e64defe0cb09b50e9ec4820aa6cf19cebbf9d85c"}
-WaveSpectra = {url = "https://github.com/JuliaOceanWaves/WaveSpectra.jl.git", rev = "d99302ead1d44d9254669d9233a674bcb3f4e9b4"}
+DimensionfulAngles = {url = "https://github.com/JuliaOceanWaves/DimensionfulAngles.jl.git"}
+WaveSpectra = {url = "https://github.com/JuliaOceanWaves/WaveSpectra.jl.git"}
