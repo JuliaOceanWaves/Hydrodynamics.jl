@@ -117,7 +117,7 @@ function hydrodynamic_oscillator(u, p, t)
     hydro = p[2]
     force_other, u_other, p_other = p[3]
     Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) +
-             force_other(t, [x; dx], u_other; p_other)
+             force_other(t, [x; dx], u_other; p = p_other)
     ddx = inverse_mass * Fₜₒₜₐₗ
 
     return [dx; ddx]
@@ -133,7 +133,7 @@ function hydrodynamic_oscillator_cic(u, p, t)
     cic = hydro[6]
     force_other, u_other, p_other = p[3]
     Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) +
-             calculate_ci_force(dx, cic) + force_other(t, [x; dx], u_other; p_other)
+             calculate_ci_force(dx, cic) + force_other(t, [x; dx], u_other; p = p_other)
     ddx = inverse_mass * Fₜₒₜₐₗ
 
     return [dx; ddx]
@@ -166,7 +166,7 @@ function hydrodynamic_oscillator_ss(u, p, t)
     dss = Aᵣ * ss + Bᵣ * dx
 
     Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) + Fᵣ +
-             force_other(t, [x; dx], u_other; p_other)
+             force_other(t, [x; dx], u_other; p = p_other)
     ddx = inverse_mass * Fₜₒₜₐₗ
 
     return [dx; ddx; dss]
