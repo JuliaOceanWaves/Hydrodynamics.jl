@@ -9,11 +9,37 @@ end
 
 global velocity_history
 
+function _collect_real_eltypes!(types, x)
+    if x isa Real
+        push!(types, typeof(x))
+    elseif x isa AbstractArray
+        if eltype(x) <: Real
+            push!(types, eltype(x))
+        else
+            foreach(value -> _collect_real_eltypes!(types, value), x)
+        end
+    elseif x isa Tuple || x isa NamedTuple
+        foreach(value -> _collect_real_eltypes!(types, value), x)
+    end
+    return types
+end
+
+function _real_eltype(args...)
+    types = DataType[]
+    for arg in args
+        _collect_real_eltypes!(types, arg)
+    end
+    if isempty(types)
+        return Float64
+    end
+    return reduce(promote_type, types)
+end
+
 function ramp_function(start_time, ramp_time, current_time)
     if current_time <= start_time
-        return 0.0
+        return zero(current_time)
     elseif current_time >= ramp_time
-        return 1.0
+        return one(current_time)
     end
     return 0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time))
 end
@@ -44,8 +70,8 @@ function calculate_radiation_force(dx, B)
     return -B * dx
 end
 
-function init_velocity_history(n_dof, n_time_steps)
-    global velocity_history = zeros(1, n_dof, n_time_steps)
+function init_velocity_history(T, n_dof, n_time_steps)
+    global velocity_history = zeros(T, 1, n_dof, n_time_steps)
 end
 
 function calculate_ci_force(dx, cic)
@@ -157,6 +183,8 @@ end
 
 function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     # u₀ = [x₀, dx₀]
+    T = _real_eltype(u₀, p)
+    u₀ = T === eltype(u₀) ? u₀ : convert.(T, u₀)
     dt = diff(ts[1:2])[1]
 
     if method == :point
@@ -164,7 +192,7 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
         ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
 
     elseif method == :cic
-        init_velocity_history(size(p[2][6][1], 2), size(p[2][6][1], 3))
+        init_velocity_history(T, size(p[2][6][1], 2), size(p[2][6][1], 3))
         ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
         ode_sol = ODE.solve(
             ode_prob, SDE.SimpleEuler(), saveat = dt, adaptive = false, dt = dt)
