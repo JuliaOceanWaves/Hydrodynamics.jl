@@ -97,17 +97,15 @@ function calculate_linear_force(dx, x, coefficients)
     return -c * dx - k * (x - x₀)
 end
 
-function calculate_total_linear_hydro_forces(dx, x, p, t)
+function calculate_total_linear_hydro_forces(x, dx, p, t)
     # NOTE: added mass force is not included and should be lumped with the 
     # body's mass matrix when solving the equations of motion that depend on this calculation
-    (inverse_mass, hydro, pto, mooring) = p
-    Kₕₛ, B, excitation_coeff, F, wave = hydro[1:5]
-    Fₑₓ = calculate_excitation_force(t, excitation_coeff, wave)
-    Fₖₕₛ = calculate_stiffness_force(x, Kₕₛ)
-    Fᵣ = calculate_radiation_force(dx, B)
-    Fₚₜₒ = calculate_linear_force(dx, x, pto)
-    Fₘ = calculate_linear_force(dx, x, mooring)
-    return Fₑₓ .+ Fₖₕₛ .+ Fᵣ .+ Fₚₜₒ .+ Fₘ .+ F
+    Kₕₛ, B, excitation_coeff, Fgb, wave = p[2][1:5]
+    Fₑₓ = calculate_excitation_force(t, excitation_coeff, wave) # excitation force
+    Fₖₕₛ = calculate_stiffness_force(x, Kₕₛ) # hydrostatic stiffness force
+    Fᵣ = calculate_radiation_force(dx, B) # radiation force
+    # Fgb = gravity force + buoyancy force
+    return Fₑₓ .+ Fᵣ .+ Fₖₕₛ .+ Fgb
 end
 
 function hydrodynamic_oscillator(u, p, t)
@@ -116,7 +114,10 @@ function hydrodynamic_oscillator(u, p, t)
     dx = u[(n_dof + 1):end] # velocity
 
     inverse_mass = p[1]
-    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t)
+    hydro = p[2]
+    force_other, u_other, p_other = p[3]
+    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) +
+             force_other(t, x, dx, u_other, p_other)
     ddx = inverse_mass * Fₜₒₜₐₗ
 
     return [dx; ddx]
@@ -128,9 +129,11 @@ function hydrodynamic_oscillator_cic(u, p, t)
     dx = u[(n_dof + 1):end] # velocity
 
     inverse_mass = p[1]
-    cic = p[2][6]
-    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t) +
-             calculate_ci_force(dx, cic)
+    hydro = p[2]
+    cic = hydro[6]
+    force_other, u_other, p_other = p[3]
+    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) +
+             calculate_ci_force(dx, cic) + force_other(t, x, dx, u_other, p_other)
     ddx = inverse_mass * Fₜₒₜₐₗ
 
     return [dx; ddx]
@@ -142,7 +145,9 @@ function hydrodynamic_oscillator_ss(u, p, t)
     # c should not include radiation damping
     # system of equations in u and du should include velocity and the state space vector
     inverse_mass = p[1]
-    state_space = p[2][6]
+    hydro = p[2]
+    state_space = hydro[6]
+    force_other, u_other, p_other = p[3]
     Aᵣ, Bᵣ, Cᵣ, Dᵣ, nₛₛ = state_space
     n_dof = Int64((size(u)[1] - nₛₛ) / 2)
 
@@ -157,10 +162,11 @@ function hydrodynamic_oscillator_ss(u, p, t)
     #    x is the state vector (ss)
     #    y is the output (radiation force)
     #    u is the input (velocity)
-    Fᵣ = Cᵣ * ss + Dᵣ * dx
+    Fᵣ = - (Cᵣ * ss + Dᵣ * dx)
     dss = Aᵣ * ss + Bᵣ * dx
 
-    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(dx, x, p, t) - Fᵣ
+    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) + Fᵣ +
+             force_other(t, x, dx, u_other, p_other)
     ddx = inverse_mass * Fₜₒₜₐₗ
 
     return [dx; ddx; dss]
