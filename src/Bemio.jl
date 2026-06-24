@@ -112,10 +112,11 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
         throw(ArgumentError("orders must be between 1 and min(max_order, length(t)-2)"))
     end
 
-    print("State space calculation:")
+    if verbose
+        print("State space calculation: \n")
+    end
     for i in axes(Kᵣ, 1), j in axes(Kᵣ, 2)
 
-        print("dof: ", i, ", ", j, " complete.")
         irf_K = Kᵣ[i, j, :]
         R2i = LinearAlgebra.norm(irf_K .- mean(irf_K))
         y = dt .* irf_K
@@ -123,9 +124,13 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
         h = ToeplitzMatrices.Hankel([y[2:end]; zeros(T, n - 1)], (n - 1, n - 1))
         u, svh, v = LinearAlgebra.svd(h)
 
+        # If dof specific orders are input, use those. 
+        # If not, run up to the max_order
         order_range = isnothing(orders) ? (1:max_order) :
                       (ss_order_by_dof[i, j]:ss_order_by_dof[i, j])
         order = last(order_range)
+
+        # Define variables so they pass outside of the loop 
         R2 = zero(T)
         ac = zeros(T, order, order)
         bc = zeros(T, order)
@@ -146,16 +151,16 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
             d = y[1]
 
             eye = LinearAlgebra.I(order)
-            solve_matrix = dt / 2 * (eye + a)
+            iidd = dt / 2 * (eye + a)
             ac_transpose = similar(a)
             for col in 1:order
                 ac_transpose[
                     :, col] = ImplicitAD.implicit_linear(
-                    transpose(solve_matrix), collect(transpose(a - eye)[:, col]))
+                    transpose(iidd), collect(transpose(a - eye)[:, col]))
             end
             ac = transpose(ac_transpose)
-            bc = dt .* ImplicitAD.implicit_linear(solve_matrix, b)
-            cc = reshape(ImplicitAD.implicit_linear(transpose(solve_matrix), vec(c)), 1, order)
+            bc = dt .* ImplicitAD.implicit_linear(iidd, b)
+            cc = reshape(ImplicitAD.implicit_linear(transpose(iidd), vec(c)), 1, order)
             dc = d - dt / 2 * (cc * b)[1]
 
             ss_K_each_dof = zeros(T, n)
@@ -165,8 +170,9 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
                 ss_K_each_dof[k] = ((cc * term) * bc)[1]
             end
 
-            R2 = R2i > 0 ? 1 - (LinearAlgebra.norm(irf_K - ss_K_each_dof) / R2i)^2 : one(T)
-            if isnothing(orders) && R2 >= R2t
+            # Calculate R2 for the state space fit of Kᵣ. Check if above the R2 threshold
+            R2 = 1 - (LinearAlgebra.norm(irf_K - ss_K_each_dof) / R2i)^2
+            if R2 >= R2t
                 break
             end
         end
