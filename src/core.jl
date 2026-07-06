@@ -62,12 +62,12 @@ function calculate_excitation_force(current_time, excitation_coefficients, wave)
     return force[:, 1, :] * weights
 end
 
-function calculate_stiffness_force(position, hydrostatic_stiffness)
-    return -hydrostatic_stiffness * position
+function calculate_stiffness_force(position, stiffness; equilibrium_position = 0.0*position)
+    return -stiffness * (position - equilibrium_position)
 end
 
-function calculate_radiation_force(velocity, radiation_damping_coefficient)
-    return -radiation_damping_coefficient * velocity
+function calculate_damping_force(velocity, damping)
+    return -damping * velocity
 end
 
 function init_velocity_history(T, n_dof, n_time_steps)
@@ -91,27 +91,30 @@ function calculate_radiation_force_convolution(velocity, irf)
 end
 
 function calculate_added_mass_force(acceleration, added_mass_coefficient)
-    # Note: this function is not used in calculate_linear_forces. 
+    # Note: this function is not used in calculate_total_linear_hydro_forces. 
     # It is recommended to lump added mass with the body mass for simulation stability and accuracy
     return -added_mass_coefficient * acceleration
 end
 
 function calculate_linear_force(velocity, position, coefficients)
     equilibrium_position, stiffness, damping = coefficients
-    return -damping * velocity - stiffness * (position - equilibrium_position)
+    return calculate_damping_force(velocity, damping) +
+           calculate_stiffness_force(position, stiffness; equilibrium_position = equilibrium_position)
 end
 
 function calculate_total_linear_hydro_forces(position, velocity, hydro, time)
     # NOTE: added mass force is not included and should be lumped with the 
     # body's mass matrix when solving the equations of motion that depend on this calculation
-    force_hydrostatic_stiffness, radiation_damping_coefficient, excitation_coefficients,
+    hydrostatic_stiffness_coefficient,
+    radiation_damping_coefficient, excitation_coefficients,
     net_gravity_buoyancy_force, wave = hydro[1:5]
 
-    force_excitation = calculate_excitation_force(time, excitation_coefficients, wave) # excitation force
-    force_hydrostatic_stiffness = calculate_stiffness_force(x, hydrostatic_stiffness_coefficient) # hydrostatic stiffness force
-    force_radiation = calculate_radiation_force(dx, radiation_damping_coefficient) # radiation force
+    excitation_force = calculate_excitation_force(time, excitation_coefficients, wave)
+    hydrostatic_stiffness_force = calculate_stiffness_force(
+        position, hydrostatic_stiffness_coefficient, 0.0*position)
+    radiation_force = calculate_damping_force(velocity, radiation_damping_coefficient)
 
-    return force_excitation .+ force_radiation .+ force_hydrostatic_stiffness .+
+    return excitation_force .+ radiation_force .+ hydrostatic_stiffness_force .+
            net_gravity_buoyancy_force
 end
 
