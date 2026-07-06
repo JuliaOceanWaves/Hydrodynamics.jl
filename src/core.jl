@@ -44,17 +44,17 @@ function ramp_function(start_time, ramp_time, current_time)
     return 0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time))
 end
 
-function calculate_excitation_force(current_time, excitation_coeff, wave)
-    omega, phase, spectrum, dFrequency, start_time, ramp_time = wave
-    ov = reshape(omega, (1, 1, length(omega)))
-    p = reshape(phase, (1, 1, length(phase)))
-    s = reshape(spectrum, (1, 1, length(spectrum)))
+function calculate_excitation_force(current_time, excitation_coefficients, wave)
+    omega, phase, spectrum, frequency_spacing, start_time, ramp_time = wave
+    omega_reshaped = reshape(omega, (1, 1, length(omega)))
+    phase_reshaped = reshape(phase, (1, 1, length(phase)))
+    spectrum_reshaped = reshape(spectrum, (1, 1, length(spectrum)))
 
     ramp = ramp_function(start_time, ramp_time, current_time)
-    exponential_term = ov .* current_time .+ p
-    force = ramp .* (excitation_coeff[:, :, :, 1] .* cos.(exponential_term) -
-             excitation_coeff[:, :, :, 2] .* sin.(exponential_term)) .*
-            sqrt.(2 * s .* dFrequency)
+    exponential_term = omega_reshaped .* current_time .+ phase_reshaped
+    force = ramp .* (excitation_coefficients[:, :, :, 1] .* cos.(exponential_term) -
+             excitation_coefficients[:, :, :, 2] .* sin.(exponential_term)) .*
+            sqrt.(2 * spectrum_reshaped .* frequency_spacing)
 
     # Format required for unitful input. `sum` doesn't play nice with matrices of mixed units and dimensions.
     # So instead multiply by an identity matrix to do the same summation in another way.
@@ -62,24 +62,26 @@ function calculate_excitation_force(current_time, excitation_coeff, wave)
     return force[:, 1, :] * weights
 end
 
-function calculate_stiffness_force(x, Kₕₛ)
-    return -Kₕₛ * x
+function calculate_stiffness_force(position, hydrostatic_stiffness)
+    return -hydrostatic_stiffness * position
 end
 
-function calculate_radiation_force(dx, B)
-    return -B * dx
+function calculate_radiation_force(velocity, radiation_damping_coefficient)
+    return -radiation_damping_coefficient * velocity
 end
 
 function init_velocity_history(T, n_dof, n_time_steps)
     global velocity_history = zeros(T, 1, n_dof, n_time_steps)
 end
 
-function calculate_ci_force(dx, cic)
-    # Convolution integrals
-    Kᵣ, tᵣ = cic
+function calculate_radiation_force_convolution(velocity, irf)
+    # Convolution integral form of the radiation damping force
     global velocity_history
     velocity_history .= circshift(velocity_history, (0, 0, 1))
-    velocity_history[1, :, 1] = dx
+    velocity_history[1, :, 1] = velocity
+
+    Kᵣ, tᵣ = irf # impulse response function tuple
+
     integrand = sum(Kᵣ .* velocity_history; dims = [2])[:, 1, :] # nDOF, nDOF, nt --> nDOF, nt
     dt = diff(tᵣ; dims = 3)[:, 1, :] # 1, nt-1
     radiation_force = sum(
@@ -88,24 +90,29 @@ function calculate_ci_force(dx, cic)
     return -radiation_force
 end
 
-function calculate_added_mass_force(ddx, A)
-    return -A * ddx
+function calculate_added_mass_force(acceleration, added_mass_coefficient)
+    # Note: this function is not used in calculate_linear_forces. 
+    # It is recommended to lump added mass with the body mass for simulation stability and accuracy
+    return -added_mass_coefficient * acceleration
 end
 
-function calculate_linear_force(dx, x, coefficients)
-    x₀, k, c = coefficients
-    return -c * dx - k * (x - x₀)
+function calculate_linear_force(velocity, position, coefficients)
+    equilibrium_position, stiffness, damping = coefficients
+    return -damping * velocity - stiffness * (position - equilibrium_position)
 end
 
-function calculate_total_linear_hydro_forces(x, dx, hydro, t)
+function calculate_total_linear_hydro_forces(position, velocity, hydro, time)
     # NOTE: added mass force is not included and should be lumped with the 
     # body's mass matrix when solving the equations of motion that depend on this calculation
-    Kₕₛ, B, excitation_coeff, Fgb, wave = hydro[1:5]
-    Fₑₓ = calculate_excitation_force(t, excitation_coeff, wave) # excitation force
-    Fₖₕₛ = calculate_stiffness_force(x, Kₕₛ) # hydrostatic stiffness force
-    Fᵣ = calculate_radiation_force(dx, B) # radiation force
-    # Fgb = gravity force + buoyancy force
-    return Fₑₓ .+ Fᵣ .+ Fₖₕₛ .+ Fgb
+    force_hydrostatic_stiffness, radiation_damping_coefficient, excitation_coefficients,
+    net_gravity_buoyancy_force, wave = hydro[1:5]
+
+    force_excitation = calculate_excitation_force(time, excitation_coefficients, wave) # excitation force
+    force_hydrostatic_stiffness = calculate_stiffness_force(x, hydrostatic_stiffness_coefficient) # hydrostatic stiffness force
+    force_radiation = calculate_radiation_force(dx, radiation_damping_coefficient) # radiation force
+
+    return force_excitation .+ force_radiation .+ force_hydrostatic_stiffness .+
+           net_gravity_buoyancy_force
 end
 
 function hydrodynamic_oscillator(u, p, t)
@@ -133,14 +140,15 @@ function hydrodynamic_oscillator_cic(u, p, t)
     cic = hydro[6]
     force_other, u_other, p_other = p[3]
     Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) +
-             calculate_ci_force(dx, cic) + force_other(t, [x; dx], u_other; p = p_other)
+             calculate_radiation_force_convolution(dx, cic) +
+             force_other(t, [x; dx], u_other; p = p_other)
     ddx = inverse_mass * Fₜₒₜₐₗ
 
     return [dx; ddx]
 end
 
 function hydrodynamic_oscillator_ss(u, p, t)
-    # u = [x, dx, states]
+    # u = [position, velocity, states]
     # added mass should utilize infinite frequency added mass only
     # c should not include radiation damping
     # system of equations in u and du should include velocity and the state space vector
@@ -194,21 +202,21 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
     dt = diff(ts[1:2])[1]
 
     if method == :point
-        ode_prob = ODE.ODEProblem(hydrodynamic_oscillator, u₀, ts[[1, end]], p)
-        ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
+        problem = ODE.ODEProblem(hydrodynamic_oscillator, u₀, ts[[1, end]], p)
+        solution = ODE.solve(problem, ODE.Vern6(), saveat = dt)
 
     elseif method == :cic
         init_velocity_history(T, size(p[2][6][1], 2), size(p[2][6][1], 3))
-        ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
-        ode_sol = ODE.solve(
-            ode_prob, SDE.SimpleEuler(), saveat = dt, adaptive = false, dt = dt)
+        problem = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
+        solution = ODE.solve(
+            problem, SDE.SimpleEuler(), saveat = dt, adaptive = false, dt = dt)
 
     elseif method == :ss
-        ode_prob = ODE.ODEProblem(hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
-        ode_sol = ODE.solve(ode_prob, ODE.Vern6(), saveat = dt)
+        problem = ODE.ODEProblem(hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
+        solution = ODE.solve(problem, ODE.Vern6(), saveat = dt)
     else
         throw(ArgumentError("method must be a Symbol with value :point, :cic, or :ss"))
     end
 
-    return ode_sol
+    return solution
 end
