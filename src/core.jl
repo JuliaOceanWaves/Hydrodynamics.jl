@@ -111,7 +111,7 @@ function calculate_total_linear_hydro_forces(position, velocity, hydro, time)
 
     excitation_force = calculate_excitation_force(time, excitation_coefficients, wave)
     hydrostatic_stiffness_force = calculate_stiffness_force(
-        position, hydrostatic_stiffness_coefficient, 0.0*position)
+        position, hydrostatic_stiffness_coefficient; equilibrium_position = 0.0*position)
     radiation_force = calculate_damping_force(velocity, radiation_damping_coefficient)
 
     return excitation_force .+ radiation_force .+ hydrostatic_stiffness_force .+
