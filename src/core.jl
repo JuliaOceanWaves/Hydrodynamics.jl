@@ -74,18 +74,15 @@ function init_velocity_history(T, n_dof, n_time_steps)
     global velocity_history = zeros(T, 1, n_dof, n_time_steps)
 end
 
-function calculate_radiation_force_convolution(velocity, irf)
+function calculate_radiation_force_convolution(velocity, irf::Bemio.BEMIrf)
     # Convolution integral form of the radiation damping force
     global velocity_history
     velocity_history .= circshift(velocity_history, (0, 0, 1))
     velocity_history[1, :, 1] = velocity
 
-    Kᵣ, tᵣ = irf # impulse response function tuple
-
-    integrand = sum(Kᵣ .* velocity_history; dims = [2])[:, 1, :] # nDOF, nDOF, nt --> nDOF, nt
-    dt = diff(tᵣ; dims = 3)[:, 1, :] # 1, nt-1
+    integrand = sum(irf.Kr .* velocity_history; dims = [2])[:, 1, :] # nDOF, nDOF, nt --> nDOF, nt
     radiation_force = sum(
-        (integrand[:, 1:(end - 1)] .+ integrand[:, 2:end]) .* 0.5 .* dt;
+        (integrand[:, 1:(end - 1)] .+ integrand[:, 2:end]) .* 0.5 .* irf.dt;
         dims = [2])[:, 1] # nDOF
     return -radiation_force
 end
@@ -159,12 +156,11 @@ function hydrodynamic_oscillator_ss(u, p, t)
     hydro = p[2]
     state_space = hydro[6]
     force_other, u_other, p_other = p[3]
-    Aᵣ, Bᵣ, Cᵣ, Dᵣ, nₛₛ = state_space
     n_dof = Int64((size(u)[1] - nₛₛ) / 2)
 
     x = u[1:n_dof] # position
     dx = u[(n_dof + 1):(n_dof * 2)] # velocity
-    ss = u[(end - nₛₛ + 1):end] # state space vector
+    ss = u[(end - state_space.nₛₛ + 1):end] # state space vector
 
     # The general state space is defined such that:
     #    dx = Aᵣ * x + Bᵣ * u
@@ -173,8 +169,8 @@ function hydrodynamic_oscillator_ss(u, p, t)
     #    x is the state vector (ss)
     #    y is the output (radiation force)
     #    u is the input (velocity)
-    Fᵣ = - (Cᵣ * ss + Dᵣ * dx)
-    dss = Aᵣ * ss + Bᵣ * dx
+    Fᵣ = - (state_space.Cᵣ * ss + state_space.Dᵣ * dx)
+    dss = state_space.Aᵣ * ss + state_space.Bᵣ * dx
 
     Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) + Fᵣ +
              force_other(t, [x; dx], u_other; p = p_other)
@@ -199,7 +195,7 @@ function hydrodynamic_stepping(dx0, x0, ts, p)
 end
 
 function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
-    # u₀ = [x₀, dx₀]
+    # u₀ = [x₀, dx₀] or u₀ = [x₀, dx₀, ss₀]
     T = _real_eltype(u₀, p)
     u₀ = T === eltype(u₀) ? u₀ : convert.(T, u₀)
     dt = diff(ts[1:2])[1]
@@ -209,12 +205,16 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
         solution = ODE.solve(problem, ODE.Vern6(), saveat = dt)
 
     elseif method == :cic
+        @assert isa(p[2][6], Bemio.BEMIrf)
+
         init_velocity_history(T, size(p[2][6][1], 2), size(p[2][6][1], 3))
         problem = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
         solution = ODE.solve(
             problem, SDE.SimpleEuler(), saveat = dt, adaptive = false, dt = dt)
 
     elseif method == :ss
+        @assert isa(p[2][6], Bemio.BEMStateSpace)
+
         problem = ODE.ODEProblem(hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
         solution = ODE.solve(problem, ODE.Vern6(), saveat = dt)
     else
