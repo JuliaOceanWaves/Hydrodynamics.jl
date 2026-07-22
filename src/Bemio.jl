@@ -9,66 +9,221 @@ using Statistics
 import ToeplitzMatrices
 import Unitful
 
-struct Hydro
-    radiating_dof::Any
-    influenced_dof::Any
-    g::Any
-    rho::Any
-    w::Any
-    period::Any
-    wave_direction::Any
-    wavelength::Any
-    depth::Any
-    volume::Any
-    cb::Any
-    ex::Any
-    fk::Any
-    di::Any
-    am::Any
-    rd::Any
-    khs::Any
+abstract type AbstractBEMData end
+
+# BEMData{T, TAX <: AbstractVector, ...} defines a family of BEMData types parameterized by T, TAX, etc. 
+# One can have the type operate differently depending on what is parameterized by
+# TODO - consider removing the frequency-independent parameters
+# TODO - store dimensional or nondimensional data in BEMData?
+# TODO - later on can define the frequency x direction parameters as matrices of WaveRealization type (even if length(direction)=1) across dofs
+
+struct BEMIrf <: AbstractBEMData
+    Kr::AbstractArray{Float64, 3}
+    end_time::Float64
+    dt::Float64
+
+    function BEMIrf(
+            Kr::AbstractArray{Float64, 3},
+            end_time::Float64,
+            dt::Float64
+    )
+        n_time_steps = end_time/dt + 1
+        @assert n_time_steps == floor(n_time_steps)
+        @assert size(Kr, 3) == Int64(n_time_steps)
+
+        new(Kr, end_time, dt)
+    end
 end
 
-function read_capytaine(filename::String)::Hydro
-    radiating_dof = NetCDF.ncread(filename, "radiating_dof")
-    influenced_dof = NetCDF.ncread(filename, "influenced_dof")
-    g = NetCDF.ncread(filename, "g")
-    rho = NetCDF.ncread(filename, "rho")
+struct BEMStateSpace <: AbstractBEMData
+    A::AbstractArray{Float64, 2}
+    B::AbstractArray{Float64, 2}
+    C::AbstractArray{Float64, 2}
+    D::AbstractArray{Float64, 2}
+    irf::BEMIrf
+    R2_fit::AbstractArray{Float64, 2}
+    order::AbstractArray{Int64, 2}
 
-    w = NetCDF.ncread(filename, "omega")
-    period = NetCDF.ncread(filename, "period")
+    function BEMStateSpace(
+            A::AbstractArray{Float64, 2},
+            B::AbstractArray{Float64, 2},
+            C::AbstractArray{Float64, 2},
+            D::AbstractArray{Float64, 2},
+            irf::BEMIrf,
+            R2_fit::AbstractArray{Float64, 2},
+            order::AbstractArray{Int64, 2}
+    )
+        n_dof = size(D, 1)
+        total_order = size(A, 1)
+        @assert ndims(A) == ndims(B) == ndims(C) == ndims(D) == ndims(R2_fit) ==
+                ndims(order) == 2 "A, B, C, D, R2_fit, order do not all have two dimensions."
+        @assert size(A) == (total_order, total_order) "State space variable A must be of size: total_order x total_order"
+        @assert size(B) == (total_order, n_dof) "State space variable B must be of size: total_order x n_dof"
+        @assert size(C) == (n_dof, total_order) "State space variable C must be of size: n_dof x total_order"
+        @assert size(D) == (n_dof, n_dof) "State space variable D must be of size: n_dof x n_dof"
+        @assert size(R2_fit) == (n_dof, n_dof) "State space variable R2_fit must be of size: n_dof x n_dof"
+        @assert size(order) == (n_dof, n_dof) "State space variable order must be of size: n_dof x n_dof"
+
+        return new(A, B, C, D, irf, R2_fit, order)
+    end
+end
+
+struct BEMData <: AbstractBEMData
+    # Below is parameter validation. Can be based on the parametric types or not
+    radiating_dof::AbstractVector
+    influenced_dof::AbstractVector
+    gravitational_constant::Float64
+    density::Float64
+    water_depth::Float64
+    location::AbstractVector{Float64}                               # influenced_dof x (x, y, z)
+    center_of_buoyancy::AbstractVector{Float64}                     # influenced_dof x (x, y, z)
+    displaced_volume::Float64                                       # influenced_dof
+    frequency::AbstractVector                                       # omega
+    wave_direction::AbstractVector                                  # wave_dir
+    excitation_coefficients::AbstractArray{Complex{Float64}, 3}     # influenced_dof x wave_dir x omega
+    Froude_Krylov_coefficients::AbstractArray{Complex{Float64}, 3}  # influenced_dof x wave_dir x omega
+    diffraction_coefficients::AbstractArray{Complex{Float64}, 3}    # influenced_dof x wave_dir x omega
+    added_mass_coefficients::AbstractArray{Float64, 3}              # influenced_dof x radiating_dof x omega
+    infinite_frequency_added_mass::AbstractArray{Float64, 2}        # influenced_dof x radiating_dof
+    radiation_damping_coefficients::AbstractArray{Float64, 3}       # influenced_dof x radiating_dof x omega
+    hydrostatic_stiffness::AbstractArray{Float64, 2}                # influenced_dof x radiating_dof
+
+    function BEMData(
+            influenced_dof::AbstractVector,
+            gravitational_constant,
+            density,
+            water_depth,
+            location::AbstractVector{Float64},
+            center_of_buoyancy::AbstractVector{Float64},
+            displaced_volume::Float64,
+            frequency::AbstractVector,
+            wave_direction::AbstractVector,
+            excitation_coefficients::AbstractArray{Complex{Float64}, 3},
+            Froude_Krylov_coefficients::AbstractArray{Complex{Float64}, 3},
+            diffraction_coefficients::AbstractArray{Complex{Float64}, 3},
+            added_mass_coefficients::AbstractArray{Float64, 3},
+            radiation_damping_coefficients::AbstractArray{Float64, 3},
+            hydrostatic_stiffness::AbstractArray{Float64, 2},
+            infinite_added_mass_coefficients::AbstractArray{Float64, 2} = added_mass_coefficients[:, :, end]
+    )
+        # @assert size(rotational_dof_flag) == size(influenced_dof) "Rotational DOF flags not the same size as influenced_dof!"
+        @assert length(center_of_buoyancy) == 3 "Center of buoyancy not a vector of x, y, z coordinates!"
+        @assert length(location) == 3 "Location not a vector of x, y, z coordinates!"
+
+        n_dof = length(influenced_dof)
+        n_freq = length(frequency)
+        n_dir = length(wave_direction)
+        @assert size(excitation_coefficients) == (n_dof, n_dir, n_freq) "Excitation coefficients not of size: n_dof x n_freq x n_dir!"
+        @assert size(Froude_Krylov_coefficients) == (n_dof, n_dir, n_freq) "Froude Krylov coefficients not of size: n_dof x n_freq x n_dir!"
+        @assert size(diffraction_coefficients) == (n_dof, n_dir, n_freq) "Diffraction coefficients not of size: n_dof x n_freq x n_dir!"
+        @assert size(added_mass_coefficients) == (n_dof, n_dof, n_freq) "Added mass coefficients not of size: n_dof x n_dof x n_freq"
+        @assert size(radiation_damping_coefficients) == (n_dof, n_dof, n_freq) "Radiation damping coefficients not of size: n_dof x n_dof x n_freq"
+        @assert size(hydrostatic_stiffness) == (n_dof, n_dof) "Hydrostatic stiffness coefficients not of size: n_dof x n_dof!"
+
+        return new(
+            influenced_dof,
+            influenced_dof,
+            gravitational_constant,
+            density,
+            water_depth,
+            location,
+            center_of_buoyancy,
+            displaced_volume,
+            frequency,
+            wave_direction,
+            excitation_coefficients,
+            Froude_Krylov_coefficients,
+            diffraction_coefficients,
+            added_mass_coefficients,
+            infinite_added_mass_coefficients,
+            radiation_damping_coefficients,
+            hydrostatic_stiffness
+        )
+    end
+end
+
+function _vector_to_complex(data)
+    return data[:, :, :, 1] + 1im * data[:, :, :, 2]
+end
+
+function read_capytaine(
+        filename::String; center_of_gravity::AbstractVector = [0.0, 0.0, 0.0],
+        center_of_buoyancy::AbstractVector = center_of_gravity,
+        volume::AbstractFloat = 0.0)::BEMData
+    temp = NetCDF.ncread(filename, "radiating_dof")
+    radiating_dof = [String(temp[:, j]) for j in axes(temp, 2)]
+
+    temp = NetCDF.ncread(filename, "influenced_dof")
+    influenced_dof = [String(temp[:, j]) for j in axes(temp, 2)]
+
+    gravity = NetCDF.ncread(filename, "g")[1]
+    density = NetCDF.ncread(filename, "rho")[1]
+
+    frequency = NetCDF.ncread(filename, "omega")
     wave_direction = NetCDF.ncread(filename, "wave_direction")
-    wavelength = NetCDF.ncread(filename, "wavelength")
-    depth = NetCDF.ncread(filename, "water_depth")
-    # volume = NetCDF.ncread(filename, "volume")
-    volume = 725.8330 # TODO - hard coded for the RM3 float bc my sample file doesn't have this parameter
+    depth = NetCDF.ncread(filename, "water_depth")[1]
 
-    # cb = NetCDF.ncread(filename, "center_of_buoyancy")
-    cb = [0.0, 0.0, -1.2927] # TODO - hard coded for the RM3 float bc my sample file doesn't have this parameter
+    try
+        center_of_gravity = NetCDF.ncread(filename, "center_of_gravity")
+    catch
+    end
+    try
+        center_of_buoyancy = NetCDF.ncread(filename, "center_of_buoyancy")
+    catch
+    end
+    try
+        volume = NetCDF.ncread(filename, "volume")
+    catch
+    end
 
-    ex = NetCDF.ncread(filename, "excitation_force") # Dimensions: influenced_dof wave_dir omega complex
-    fk = NetCDF.ncread(filename, "Froude_Krylov_force") # Dimensions: influenced_dof wave_dir omega complex
-    di = NetCDF.ncread(filename, "diffraction_force") # Dimensions: influenced_dof wave_dir omega complex
-    am = NetCDF.ncread(filename, "added_mass") # Dimensions: influenced_dof radiating_dof omega
-    # ainf = am[:, :, end]
-    rd = NetCDF.ncread(filename, "radiation_damping") # Dimensions: influenced_dof radiating_dof omega
-    khs = NetCDF.ncread(filename, "hydrostatic_stiffness")' # Dimensions: radiating_dof influenced_dof --> influenced_dof radiating_dof
+    excitation_coefficients = _vector_to_complex(NetCDF.ncread(filename, "excitation_force")) # Dimensions: influenced_dof wave_dir omega complex
+    Froude_Krylov_coefficients = _vector_to_complex(NetCDF.ncread(filename, "Froude_Krylov_force")) # Dimensions: influenced_dof wave_dir omega complex
+    diffraction_coefficients = _vector_to_complex(NetCDF.ncread(filename, "diffraction_force")) # Dimensions: influenced_dof wave_dir omega complex
 
-    # ainf, ra_t, ra_w = radiationIRF!()
-    return Hydro(radiating_dof, influenced_dof, g, rho, w, period, wave_direction,
-        wavelength, depth, volume, cb, ex, fk, di, am, rd, khs)
+    # Capytaine uses an inverted x coordinate: +phase velocity in -x. Hydrodynamics.jl expects +phase velocity in +x
+    excitation_coefficients = conj.(excitation_coefficients)
+    Froude_Krylov_coefficients = conj.(Froude_Krylov_coefficients)
+    diffraction_coefficients = conj.(diffraction_coefficients)
+
+    added_mass_coefficients = NetCDF.ncread(filename, "added_mass") # Dimensions: influenced_dof radiating_dof omega
+    infinite_added_mass_coefficients = added_mass_coefficients[:, :, end]
+    radiation_damping_coefficients = NetCDF.ncread(filename, "radiation_damping") # Dimensions: influenced_dof radiating_dof omega
+    hydrostatic_stiffness = NetCDF.ncread(filename, "hydrostatic_stiffness")' # Dimensions: radiating_dof influenced_dof --> influenced_dof radiating_dof
+
+    return BEMData(influenced_dof,
+        gravity,
+        density,
+        depth,
+        center_of_gravity,
+        center_of_buoyancy,
+        volume,
+        frequency,
+        wave_direction,
+        excitation_coefficients,
+        Froude_Krylov_coefficients,
+        diffraction_coefficients,
+        added_mass_coefficients,
+        radiation_damping_coefficients,
+        hydrostatic_stiffness,
+        infinite_added_mass_coefficients
+    )
 end
 
-function radiation_irf(
-        rd_raw::Array, w_raw::Vector; w_max = 20.0, t = collect(0:0.1:60)')
+function radiation_impulse_response_function(
+        rd_raw::Array, w_raw::Vector; w_max = 20.0, t = collect(0:0.1:60)')::BEMIrf
+    @assert length(size(t[:])) == 1
+    t = reshape(t, 1, length(t))
+
+    dt = diff(t; dims = 2)
+    @assert all(abs.(dt[1] .- dt) .< 1e-12)
+
+    nt = length(t)
+
     # cut off at the frequency limit
     i_w_end = argmin(abs.(w_raw .- w_max))
     w = w_raw[1:i_w_end]
     rd = rd_raw[:, :, 1:i_w_end]
     nw = length(w)
-
-    # timeseries array
-    nt = length(t)
 
     # Reshape arrays to enable element-wise multiplication without loops and overwriting initialized arrays
     c = reshape(cos.(w * t), 1, 1, nw, nt)
@@ -78,17 +233,16 @@ function radiation_irf(
         (integrand[:, :, 1:(end - 1), :] .+ integrand[:, :, 2:end, :]) .* 0.5 .* dw;
         dims = [3])[:, :, 1, :]
     Kᵣ = 2 / pi .* integral
-    tᵣ = reshape(t, 1, 1, size(Kᵣ, 3))
-    Kᵣ, tᵣ
+
+    BEMIrf(Kᵣ, t[end], dt[1])
 end
 
-function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
+function _radiation_state_space_realization(Kᵣ, dt, max_order, R2t;
         orders = nothing, verbose = true)
     if max_order < 1
         throw(ArgumentError("max_order must be at least 1"))
     end
 
-    dt = tᵣ[2] - tᵣ[1]
     n_time = size(Kᵣ, 3)
     if n_time < max_order + 2
         throw(ArgumentError("radiation_state_space requires at least " *
@@ -209,16 +363,15 @@ function _radiation_state_space_realization(Kᵣ, tᵣ, max_order, R2t;
     return ss_A, ss_B, ss_C, ss_D_by_dof, ss_K_by_dof, ss_R2_by_dof, ss_order_by_dof
 end
 
-function radiation_state_space(Kᵣ, tᵣ, max_order = 10, R2t = 0.95;
-        orders = nothing, ad_mode = "cfd", verbose = true)
-    if ndims(Kᵣ) == 1
-        K_values = Unitful.ustrip.(reshape(Kᵣ, 1, 1, length(Kᵣ)))
-    elseif ndims(Kᵣ) == 3
-        K_values = Unitful.ustrip.(Kᵣ)
+function radiation_state_space(irf::BEMIrf, max_order = 10, R2t = 0.95;
+        orders = nothing, ad_mode = "cfd", verbose = true)::BEMStateSpace
+    if ndims(irf.Kr) == 1
+        K_values = Unitful.ustrip.(reshape(irf.Kr, 1, 1, length(irf.Kr)))
+    elseif ndims(irf.Kr) == 3
+        K_values = Unitful.ustrip.(irf.Kr)
     else
         throw(ArgumentError("radiation_state_space expects a vector or a 3D IRF array"))
     end
-    t_values = vec(Unitful.ustrip.(tᵣ))
     K_values_primal = similar(K_values, Float64)
     for idx in eachindex(K_values)
         value = K_values[idx]
@@ -226,17 +379,6 @@ function radiation_state_space(Kᵣ, tᵣ, max_order = 10, R2t = 0.95;
             value = ForwardDiff.value(value)
         end
         K_values_primal[idx] = Float64(value)
-    end
-    t_values_primal = similar(t_values, Float64)
-    for idx in eachindex(t_values)
-        value = t_values[idx]
-        while value isa ForwardDiff.Dual
-            value = ForwardDiff.value(value)
-        end
-        t_values_primal[idx] = Float64(value)
-    end
-    if length(t_values_primal) != size(K_values_primal, 3)
-        throw(DimensionMismatch("tᵣ length must match the IRF time dimension"))
     end
 
     if isnothing(orders)
@@ -246,24 +388,24 @@ function radiation_state_space(Kᵣ, tᵣ, max_order = 10, R2t = 0.95;
         _,
         _,
         ss_order_by_dof = _radiation_state_space_realization(
-            K_values_primal, t_values_primal, max_order, R2t; verbose)
+            K_values_primal, irf.dt, max_order, R2t; verbose)
     else
         ss_order_by_dof = Int64.(orders)
     end
 
     # The SVD-based realization is differentiated piecewise: model orders are
     # selected from primal values, then held fixed for the provided AD rule.
-    p = (size(K_values_primal), t_values_primal, max_order, R2t, ss_order_by_dof)
+    p = (size(K_values_primal), irf.dt, max_order, R2t, ss_order_by_dof)
     flat = ImplicitAD.provide_rule(
         function (x, p)
-            dims, t_values, max_order, R2t, fixed_orders = p
+            dims, dt_values, max_order, R2t, fixed_orders = p
             ss_A, ss_B,
             ss_C,
             ss_D,
             ss_K,
             ss_R2,
             _ = _radiation_state_space_realization(
-                reshape(x, dims), t_values, max_order, R2t;
+                reshape(x, dims), dt_values, max_order, R2t;
                 orders = fixed_orders, verbose = false)
             return vcat(vec(ss_A), vec(ss_B), vec(ss_C), vec(ss_D), vec(ss_K), vec(ss_R2))
         end,
@@ -292,11 +434,12 @@ function radiation_state_space(Kᵣ, tᵣ, max_order = 10, R2t = 0.95;
     ss_K_len = n_influenced * n_radiating * n_time
     ss_K = reshape(flat[next_index:(next_index + ss_K_len - 1)], size(K_values_primal))
     next_index += ss_K_len
+    ss_K = BEMIrf(ss_K, irf.end_time, irf.dt)
 
     ss_R2_len = n_influenced * n_radiating
     ss_R2 = reshape(flat[next_index:(next_index + ss_R2_len - 1)], n_influenced, n_radiating)
 
-    return ss_A, ss_B, ss_C, ss_D, ss_K, ss_R2, ss_order_by_dof
+    return BEMStateSpace(ss_A, ss_B, ss_C, ss_D, ss_K, ss_R2, ss_order_by_dof)
 end
 
 function alternate_Ainf(Kᵣ, A, w_raw, tCIC_raw)

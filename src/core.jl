@@ -140,10 +140,10 @@ function hydrodynamic_oscillator_cic(u, p, t)
 
     inverse_mass = p[1]
     hydro = p[2]
-    cic = hydro[6]
+    irf = hydro[6]
     force_other, u_other, p_other = p[3]
     Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) +
-             calculate_radiation_force_convolution(dx, cic) +
+             calculate_radiation_force_convolution(dx, irf) +
              force_other(t, [x; dx], u_other; p = p_other)
     ddx = inverse_mass * Fₜₒₜₐₗ
 
