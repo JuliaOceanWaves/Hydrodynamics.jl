@@ -43,6 +43,7 @@ struct BEMStateSpace <: AbstractBEMData
     irf::BEMIrf
     R2_fit::AbstractArray{Float64, 2}
     order::AbstractArray{Int64, 2}
+    n_orders::Int64
 
     function BEMStateSpace(
             A::AbstractArray{Float64, 2},
@@ -64,7 +65,7 @@ struct BEMStateSpace <: AbstractBEMData
         @assert size(R2_fit) == (n_dof, n_dof) "State space variable R2_fit must be of size: n_dof x n_dof"
         @assert size(order) == (n_dof, n_dof) "State space variable order must be of size: n_dof x n_dof"
 
-        return new(A, B, C, D, irf, R2_fit, order)
+        return new(A, B, C, D, irf, R2_fit, order, sum(order))
     end
 end
 
@@ -442,16 +443,16 @@ function radiation_state_space(irf::BEMIrf, max_order = 10, R2t = 0.95;
     return BEMStateSpace(ss_A, ss_B, ss_C, ss_D, ss_K, ss_R2, ss_order_by_dof)
 end
 
-function alternate_Ainf(Kᵣ, A, w_raw, tCIC_raw)
-    nw = length(w_raw)
-    nt = length(tCIC_raw)
-    w = reshape(w_raw, 1, 1, 1, nw)
-    tCIC = reshape(tCIC_raw, 1, 1, nt)
+function alternate_Ainf(bem::BEMData, irf::BEMIrf)
+    nw = length(bem.frequency)
+    nt = Int64(irf.end_time/irf.dt+1)
+    w = reshape(bem.frequency, 1, 1, 1, nw)
+
+    tCIC = reshape(Vector(0:irf.dt:irf.end_time), 1, 1, nt)
 
     integrand = Kᵣ .* sin.(w .* tCIC) # nDOF, nDOF, nt, nw
-    dt = diff(tCIC; dims = 3)
     integral = sum(
-        (integrand[:, :, 1:(end - 1), :] .+ integrand[:, :, 2:end, :]) .* 0.5 .* dt;
+        (integrand[:, :, 1:(end - 1), :] .+ integrand[:, :, 2:end, :]) .* 0.5 .* irf.dt;
         dims = [3]) # nDOF, nDOF, 1, nw
     ainf_temp = A + (integral ./ w)[:, :, 1, :] # nDOF, nDOF, nw
     ainf = mean(ainf_temp; dims = [3])[:, :, 1] # nDOF, nDOF
