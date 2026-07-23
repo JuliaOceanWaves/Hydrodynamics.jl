@@ -36,13 +36,13 @@ struct BEMIrf <: AbstractBEMData
 end
 
 struct BEMStateSpace <: AbstractBEMData
-    A::AbstractArray{Float64, 2}
-    B::AbstractArray{Float64, 2}
-    C::AbstractArray{Float64, 2}
-    D::AbstractArray{Float64, 2}
+    A::AbstractArray{Float64, 2} # n_orders x n_orders
+    B::AbstractArray{Float64, 2} # n_orders x n_dof
+    C::AbstractArray{Float64, 2} # n_dof x n_orders
+    D::AbstractArray{Float64, 2} # n_dof x n_dof
     irf::BEMIrf
-    R2_fit::AbstractArray{Float64, 2}
-    order::AbstractArray{Int64, 2}
+    R2_fit::AbstractArray{Float64, 2} # dof x dof
+    order::AbstractArray{Int64, 2} # dof x dof
     n_orders::Int64
 
     function BEMStateSpace(
@@ -85,9 +85,9 @@ struct BEMData <: AbstractBEMData
     Froude_Krylov_coefficients::AbstractArray{Complex{Float64}, 3}  # influenced_dof x wave_dir x omega
     diffraction_coefficients::AbstractArray{Complex{Float64}, 3}    # influenced_dof x wave_dir x omega
     added_mass_coefficients::AbstractArray{Float64, 3}              # influenced_dof x radiating_dof x omega
-    infinite_added_mass_coefficients::AbstractArray{Float64, 2}        # influenced_dof x radiating_dof
+    infinite_added_mass_coefficients::AbstractArray{Float64, 2}     # influenced_dof x radiating_dof
     radiation_damping_coefficients::AbstractArray{Float64, 3}       # influenced_dof x radiating_dof x omega
-    hydrostatic_stiffness_coefficients::AbstractArray{Float64, 2}                # influenced_dof x radiating_dof
+    hydrostatic_stiffness_coefficients::AbstractArray{Float64, 2}   # influenced_dof x radiating_dof
 
     function BEMData(
             influenced_dof::AbstractVector,
