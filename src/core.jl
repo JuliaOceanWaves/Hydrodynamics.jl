@@ -52,8 +52,7 @@ function calculate_excitation_force(current_time, excitation_coefficients, wave)
 
     ramp = ramp_function(start_time, ramp_time, current_time)
     exponential_term = omega_reshaped .* current_time .+ phase_reshaped
-    force = ramp .* (excitation_coefficients[:, :, :, 1] .* cos.(exponential_term) -
-             excitation_coefficients[:, :, :, 2] .* sin.(exponential_term)) .*
+    force = ramp .* real(excitation_coefficients .* exp.(im*exponential_term)) .*
             sqrt.(2 * spectrum_reshaped .* frequency_spacing)
 
     # Format required for unitful input. `sum` doesn't play nice with matrices of mixed units and dimensions.
@@ -74,18 +73,15 @@ function init_velocity_history(T, n_dof, n_time_steps)
     global velocity_history = zeros(T, 1, n_dof, n_time_steps)
 end
 
-function calculate_radiation_force_convolution(velocity, irf)
+function calculate_radiation_force_convolution(velocity, irf::Bemio.BEMIrf)
     # Convolution integral form of the radiation damping force
     global velocity_history
     velocity_history .= circshift(velocity_history, (0, 0, 1))
     velocity_history[1, :, 1] = velocity
 
-    Kᵣ, tᵣ = irf # impulse response function tuple
-
-    integrand = sum(Kᵣ .* velocity_history; dims = [2])[:, 1, :] # nDOF, nDOF, nt --> nDOF, nt
-    dt = diff(tᵣ; dims = 3)[:, 1, :] # 1, nt-1
+    integrand = sum(irf.Kr .* velocity_history; dims = [2])[:, 1, :] # nDOF, nDOF, nt --> nDOF, nt
     radiation_force = sum(
-        (integrand[:, 1:(end - 1)] .+ integrand[:, 2:end]) .* 0.5 .* dt;
+        (integrand[:, 1:(end - 1)] .+ integrand[:, 2:end]) .* 0.5 .* irf.dt;
         dims = [2])[:, 1] # nDOF
     return -radiation_force
 end
@@ -140,10 +136,10 @@ function hydrodynamic_oscillator_cic(u, p, t)
 
     inverse_mass = p[1]
     hydro = p[2]
-    cic = hydro[6]
+    irf = hydro[6]
     force_other, u_other, p_other = p[3]
     Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) +
-             calculate_radiation_force_convolution(dx, cic) +
+             calculate_radiation_force_convolution(dx, irf) +
              force_other(t, [x; dx], u_other; p = p_other)
     ddx = inverse_mass * Fₜₒₜₐₗ
 
@@ -159,12 +155,11 @@ function hydrodynamic_oscillator_ss(u, p, t)
     hydro = p[2]
     state_space = hydro[6]
     force_other, u_other, p_other = p[3]
-    Aᵣ, Bᵣ, Cᵣ, Dᵣ, nₛₛ = state_space
-    n_dof = Int64((size(u)[1] - nₛₛ) / 2)
+    n_dof = Int64((size(u)[1] - state_space.n_orders) / 2)
 
     x = u[1:n_dof] # position
     dx = u[(n_dof + 1):(n_dof * 2)] # velocity
-    ss = u[(end - nₛₛ + 1):end] # state space vector
+    ss = u[(end - state_space.n_orders + 1):end] # state space vector
 
     # The general state space is defined such that:
     #    dx = Aᵣ * x + Bᵣ * u
@@ -173,8 +168,8 @@ function hydrodynamic_oscillator_ss(u, p, t)
     #    x is the state vector (ss)
     #    y is the output (radiation force)
     #    u is the input (velocity)
-    Fᵣ = - (Cᵣ * ss + Dᵣ * dx)
-    dss = Aᵣ * ss + Bᵣ * dx
+    Fᵣ = - (state_space.C * ss + state_space.D * dx)
+    dss = state_space.A * ss + state_space.B * dx
 
     Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) + Fᵣ +
              force_other(t, [x; dx], u_other; p = p_other)
@@ -199,7 +194,7 @@ function hydrodynamic_stepping(dx0, x0, ts, p)
 end
 
 function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
-    # u₀ = [x₀, dx₀]
+    # u₀ = [x₀, dx₀] or u₀ = [x₀, dx₀, ss₀]
     T = _real_eltype(u₀, p)
     u₀ = T === eltype(u₀) ? u₀ : convert.(T, u₀)
     dt = diff(ts[1:2])[1]
@@ -209,12 +204,16 @@ function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
         solution = ODE.solve(problem, ODE.Vern6(), saveat = dt)
 
     elseif method == :cic
-        init_velocity_history(T, size(p[2][6][1], 2), size(p[2][6][1], 3))
+        # TODO - confirm that p[2][6] is of type BEMIrf
+
+        init_velocity_history(T, size(p[2][6].Kr, 2), size(p[2][6].Kr, 3))
         problem = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
         solution = ODE.solve(
             problem, SDE.SimpleEuler(), saveat = dt, adaptive = false, dt = dt)
 
     elseif method == :ss
+        # TODO - confirm that p[2][6] is of type BEMStateSpace
+
         problem = ODE.ODEProblem(hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
         solution = ODE.solve(problem, ODE.Vern6(), saveat = dt)
     else
