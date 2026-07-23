@@ -85,7 +85,7 @@ struct BEMData <: AbstractBEMData
     Froude_Krylov_coefficients::AbstractArray{Complex{Float64}, 3}  # influenced_dof x wave_dir x omega
     diffraction_coefficients::AbstractArray{Complex{Float64}, 3}    # influenced_dof x wave_dir x omega
     added_mass_coefficients::AbstractArray{Float64, 3}              # influenced_dof x radiating_dof x omega
-    infinite_frequency_added_mass::AbstractArray{Float64, 2}        # influenced_dof x radiating_dof
+    infinite_added_mass_coefficients::AbstractArray{Float64, 2}        # influenced_dof x radiating_dof
     radiation_damping_coefficients::AbstractArray{Float64, 3}       # influenced_dof x radiating_dof x omega
     hydrostatic_stiffness::AbstractArray{Float64, 2}                # influenced_dof x radiating_dof
 
@@ -143,12 +143,35 @@ struct BEMData <: AbstractBEMData
     end
 end
 
+function select_BEMData_dofs(bem::BEMData,
+        dof::Union{AbstractVector{<:Integer}, AbstractRange{<:Integer}})::BEMData
+    BEMData(
+        bem.influenced_dof[dof],
+        bem.gravitational_constant,
+        bem.density,
+        bem.water_depth,
+        bem.location,
+        bem.center_of_buoyancy,
+        bem.displaced_volume,
+        bem.frequency,
+        bem.wave_direction,
+        bem.excitation_coefficients[dof, :, :],
+        bem.Froude_Krylov_coefficients[dof, :, :],
+        bem.diffraction_coefficients[dof, :, :],
+        bem.added_mass_coefficients[dof, dof, :],
+        bem.radiation_damping_coefficients[dof, dof, :],
+        bem.hydrostatic_stiffness[dof, dof],
+        bem.infinite_added_mass_coefficients[dof, dof]
+    )
+end
+
 function _vector_to_complex(data)
     return data[:, :, :, 1] + 1im * data[:, :, :, 2]
 end
 
 function read_capytaine(
-        filename::String; center_of_gravity::AbstractVector = [0.0, 0.0, 0.0],
+        filename::String; dofs = nothing, center_of_gravity::AbstractVector = [
+            0.0, 0.0, 0.0],
         center_of_buoyancy::AbstractVector = center_of_gravity,
         volume::AbstractFloat = 0.0)::BEMData
     temp = NetCDF.ncread(filename, "radiating_dof")
@@ -161,6 +184,7 @@ function read_capytaine(
     density = NetCDF.ncread(filename, "rho")[1]
 
     frequency = NetCDF.ncread(filename, "omega")
+    frequency = round.(frequency, digits = 14) # round off errors from reading the nc file
     wave_direction = NetCDF.ncread(filename, "wave_direction")
     depth = NetCDF.ncread(filename, "water_depth")[1]
 
@@ -191,7 +215,11 @@ function read_capytaine(
     radiation_damping_coefficients = NetCDF.ncread(filename, "radiation_damping") # Dimensions: influenced_dof radiating_dof omega
     hydrostatic_stiffness = NetCDF.ncread(filename, "hydrostatic_stiffness")' # Dimensions: radiating_dof influenced_dof --> influenced_dof radiating_dof
 
-    return BEMData(influenced_dof,
+    if isnothing(dofs)
+        dofs = 1:1:length(influenced_dof)
+    end
+
+    return BEMData(influenced_dof[dofs],
         gravity,
         density,
         depth,
@@ -200,13 +228,13 @@ function read_capytaine(
         volume,
         frequency,
         wave_direction,
-        excitation_coefficients,
-        Froude_Krylov_coefficients,
-        diffraction_coefficients,
-        added_mass_coefficients,
-        radiation_damping_coefficients,
-        hydrostatic_stiffness,
-        infinite_added_mass_coefficients
+        excitation_coefficients[dofs, :, :],
+        Froude_Krylov_coefficients[dofs, :, :],
+        diffraction_coefficients[dofs, :, :],
+        added_mass_coefficients[dofs, dofs, :],
+        radiation_damping_coefficients[dofs, dofs, :],
+        hydrostatic_stiffness[dofs, dofs],
+        infinite_added_mass_coefficients[dofs, dofs]
     )
 end
 
@@ -450,12 +478,17 @@ function alternate_Ainf(bem::BEMData, irf::BEMIrf)
 
     tCIC = reshape(Vector(0:irf.dt:irf.end_time), 1, 1, nt)
 
-    integrand = Kᵣ .* sin.(w .* tCIC) # nDOF, nDOF, nt, nw
+    integrand = irf.Kr .* sin.(w .* tCIC) # nDOF, nDOF, nt, nw
     integral = sum(
         (integrand[:, :, 1:(end - 1), :] .+ integrand[:, :, 2:end, :]) .* 0.5 .* irf.dt;
         dims = [3]) # nDOF, nDOF, 1, nw
-    ainf_temp = A + (integral ./ w)[:, :, 1, :] # nDOF, nDOF, nw
+    ainf_temp = bem.added_mass_coefficients + (integral ./ w)[:, :, 1, :] # nDOF, nDOF, nw
     ainf = mean(ainf_temp; dims = [3])[:, :, 1] # nDOF, nDOF
+end
+
+function alternate_Ainf!(bem::BEMData, irf::BEMIrf)
+    bem.infinite_frequency_added_mass .= alternate_Ainf(bem, irf)
+    return nothing
 end
 
 end
