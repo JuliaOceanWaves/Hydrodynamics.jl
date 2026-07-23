@@ -76,7 +76,7 @@ struct BEMData <: AbstractBEMData
     gravitational_constant::Float64
     density::Float64
     water_depth::Float64
-    location::AbstractVector{Float64}                               # influenced_dof x (x, y, z)
+    center_of_gravity::AbstractVector{Float64}                               # influenced_dof x (x, y, z)
     center_of_buoyancy::AbstractVector{Float64}                     # influenced_dof x (x, y, z)
     displaced_volume::Float64                                       # influenced_dof
     frequency::AbstractVector                                       # omega
@@ -94,7 +94,7 @@ struct BEMData <: AbstractBEMData
             gravitational_constant,
             density,
             water_depth,
-            location::AbstractVector{Float64},
+            center_of_gravity::AbstractVector{Float64},
             center_of_buoyancy::AbstractVector{Float64},
             displaced_volume::Float64,
             frequency::AbstractVector,
@@ -109,7 +109,7 @@ struct BEMData <: AbstractBEMData
     )
         # @assert size(rotational_dof_flag) == size(influenced_dof) "Rotational DOF flags not the same size as influenced_dof!"
         @assert length(center_of_buoyancy) == 3 "Center of buoyancy not a vector of x, y, z coordinates!"
-        @assert length(location) == 3 "Location not a vector of x, y, z coordinates!"
+        @assert length(center_of_gravity) == 3 "center_of_gravity not a vector of x, y, z coordinates!"
 
         n_dof = length(influenced_dof)
         n_freq = length(frequency)
@@ -127,7 +127,7 @@ struct BEMData <: AbstractBEMData
             gravitational_constant,
             density,
             water_depth,
-            location,
+            center_of_gravity,
             center_of_buoyancy,
             displaced_volume,
             frequency,
@@ -150,7 +150,7 @@ function select_BEMData_dofs(bem::BEMData,
         bem.gravitational_constant,
         bem.density,
         bem.water_depth,
-        bem.location,
+        bem.center_of_gravity,
         bem.center_of_buoyancy,
         bem.displaced_volume,
         bem.frequency,
@@ -487,7 +487,7 @@ function alternate_Ainf(bem::BEMData, irf::BEMIrf)
 end
 
 function alternate_Ainf!(bem::BEMData, irf::BEMIrf)
-    bem.infinite_frequency_added_mass .= alternate_Ainf(bem, irf)
+    bem.infinite_added_mass_coefficients .= alternate_Ainf(bem, irf)
     return nothing
 end
 
