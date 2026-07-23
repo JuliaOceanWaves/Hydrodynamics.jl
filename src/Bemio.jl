@@ -87,7 +87,7 @@ struct BEMData <: AbstractBEMData
     added_mass_coefficients::AbstractArray{Float64, 3}              # influenced_dof x radiating_dof x omega
     infinite_added_mass_coefficients::AbstractArray{Float64, 2}        # influenced_dof x radiating_dof
     radiation_damping_coefficients::AbstractArray{Float64, 3}       # influenced_dof x radiating_dof x omega
-    hydrostatic_stiffness::AbstractArray{Float64, 2}                # influenced_dof x radiating_dof
+    hydrostatic_stiffness_coefficients::AbstractArray{Float64, 2}                # influenced_dof x radiating_dof
 
     function BEMData(
             influenced_dof::AbstractVector,
@@ -104,7 +104,7 @@ struct BEMData <: AbstractBEMData
             diffraction_coefficients::AbstractArray{Complex{Float64}, 3},
             added_mass_coefficients::AbstractArray{Float64, 3},
             radiation_damping_coefficients::AbstractArray{Float64, 3},
-            hydrostatic_stiffness::AbstractArray{Float64, 2},
+            hydrostatic_stiffness_coefficients::AbstractArray{Float64, 2},
             infinite_added_mass_coefficients::AbstractArray{Float64, 2} = added_mass_coefficients[:, :, end]
     )
         # @assert size(rotational_dof_flag) == size(influenced_dof) "Rotational DOF flags not the same size as influenced_dof!"
@@ -119,7 +119,7 @@ struct BEMData <: AbstractBEMData
         @assert size(diffraction_coefficients) == (n_dof, n_dir, n_freq) "Diffraction coefficients not of size: n_dof x n_freq x n_dir!"
         @assert size(added_mass_coefficients) == (n_dof, n_dof, n_freq) "Added mass coefficients not of size: n_dof x n_dof x n_freq"
         @assert size(radiation_damping_coefficients) == (n_dof, n_dof, n_freq) "Radiation damping coefficients not of size: n_dof x n_dof x n_freq"
-        @assert size(hydrostatic_stiffness) == (n_dof, n_dof) "Hydrostatic stiffness coefficients not of size: n_dof x n_dof!"
+        @assert size(hydrostatic_stiffness_coefficients) == (n_dof, n_dof) "Hydrostatic stiffness coefficients not of size: n_dof x n_dof!"
 
         return new(
             influenced_dof,
@@ -138,7 +138,7 @@ struct BEMData <: AbstractBEMData
             added_mass_coefficients,
             infinite_added_mass_coefficients,
             radiation_damping_coefficients,
-            hydrostatic_stiffness
+            hydrostatic_stiffness_coefficients
         )
     end
 end
@@ -160,7 +160,7 @@ function select_BEMData_dofs(bem::BEMData,
         bem.diffraction_coefficients[dof, :, :],
         bem.added_mass_coefficients[dof, dof, :],
         bem.radiation_damping_coefficients[dof, dof, :],
-        bem.hydrostatic_stiffness[dof, dof],
+        bem.hydrostatic_stiffness_coefficients[dof, dof],
         bem.infinite_added_mass_coefficients[dof, dof]
     )
 end
@@ -213,7 +213,7 @@ function read_capytaine(
     added_mass_coefficients = NetCDF.ncread(filename, "added_mass") # Dimensions: influenced_dof radiating_dof omega
     infinite_added_mass_coefficients = added_mass_coefficients[:, :, end]
     radiation_damping_coefficients = NetCDF.ncread(filename, "radiation_damping") # Dimensions: influenced_dof radiating_dof omega
-    hydrostatic_stiffness = NetCDF.ncread(filename, "hydrostatic_stiffness")' # Dimensions: radiating_dof influenced_dof --> influenced_dof radiating_dof
+    hydrostatic_stiffness_coefficients = NetCDF.ncread(filename, "hydrostatic_stiffness")' # Dimensions: radiating_dof influenced_dof --> influenced_dof radiating_dof
 
     if isnothing(dofs)
         dofs = 1:1:length(influenced_dof)
@@ -233,7 +233,7 @@ function read_capytaine(
         diffraction_coefficients[dofs, :, :],
         added_mass_coefficients[dofs, dofs, :],
         radiation_damping_coefficients[dofs, dofs, :],
-        hydrostatic_stiffness[dofs, dofs],
+        hydrostatic_stiffness_coefficients[dofs, dofs],
         infinite_added_mass_coefficients[dofs, dofs]
     )
 end
