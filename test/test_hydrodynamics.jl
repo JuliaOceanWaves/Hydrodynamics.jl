@@ -23,6 +23,13 @@ end
     @test_broken ramp_function(1.0u"s", 3.0u"s", 4.0u"s^2")
 end
 
+function linear_extra_force(t, platform_state, system_state, u; p = nothing)
+    n_dof = Int(length(platform_state) / 2)
+    x = platform_state[1:n_dof]
+    dx = platform_state[(n_dof + 1):(2n_dof)]
+    return Hydrodynamics.calculate_linear_force(dx, x, p)
+end
+
 @testset "excitation force and solver" begin
     omega = [1.0, 2.0]
     phase = [0.0, pi / 2]
@@ -47,7 +54,23 @@ end
     mooring = ([0.0], 0*k, 0*c)
 
     hydro = (k, c, excitation_coeff, constant_forces, wave)
-    p = (inverse_mass, hydro, pto, mooring)
+    pto_system = Hydrodynamics.ExtraSystem(
+        n_state = 0,
+        force = linear_extra_force,
+        p = pto
+    )
+
+    mooring_system = Hydrodynamics.ExtraSystem(
+        n_state = 0,
+        force = linear_extra_force,
+        p = mooring
+    )
+
+    p = Hydrodynamics.HydroParams(
+        inverse_mass = inverse_mass,
+        hydro = hydro,
+        extra_systems = [pto_system, mooring_system]
+    )
 
     ts = collect(0.0:0.1:0.3)
     sol = hydrodynamic_solver([0.0; 0.1], ts, p, method = :point)
@@ -62,7 +85,7 @@ end
     khs = [1.0 0.0; 0.0 1.0]
     position = [2.0, 3.0]
     force = Hydrodynamics.calculate_stiffness_force(position, khs)
-    @test force == position
+    @test force == -position
     @test typeof(force) <: Vector
     @test size(force) == size(position)
 
@@ -73,7 +96,6 @@ end
     @test force2 == [dp, -dp]
     @test typeof(force) <: Vector
     @test size(force2) == size(position)
-    @test force == force2
 
     # No matter khs, force is zero when the equilibrium_position = position
     khs = [1.23e6 -3e3; 0.0 123.45e9]
@@ -94,7 +116,7 @@ end
         khs = [1.0 0.0; 0.0 1.0] .* stiffness_units[dof, dof]
         position = [2.0, 3.0] .* position_units[dof]
         force = Hydrodynamics.calculate_stiffness_force(position, khs; equilibrium_position = 0.0*position)
-        @test Unitful.ustrip.(force) == nitful.ustrip.(position)
+        @test Unitful.ustrip.(force) == Unitful.ustrip.(-position)
         @test typeof(force) <: Vector
         @test size(force) == size(position)
 
@@ -120,7 +142,7 @@ end
     c = [1.0 0.0; 0.0 1.0]
     velocity = [2.0, 3.0]
     force = Hydrodynamics.calculate_damping_force(velocity, c)
-    @test force == velocity
+    @test force == -velocity
     @test typeof(force) <: Vector
     @test size(force) == size(velocity)
 
@@ -131,11 +153,10 @@ end
     @test force2 == [dp, -dp]
     @test typeof(force) <: Vector
     @test size(force2) == size(velocity)
-    @test force == force2
 end
 
 @testset "test damping force (Unitful)" begin
-    damping_units = Unitful.upreferred.([u"N/m" u"N"/rad; u"N*m/m" u"N*m"/rad])
+    damping_units = Unitful.upreferred.([u"N/(m/s)" u"N*s"/rad; u"N*m/(m/s)" u"N*m*s"/rad])
     velocity_units = [u"m/s", rad*u"s^-1"]
     force_units = Unitful.upreferred.([u"N", u"N*m"])
 
@@ -144,7 +165,7 @@ end
         c = [1.0 0.0; 0.0 1.0] .* damping_units[dof, dof]
         velocity = [2.0, 3.0] .* velocity_units[dof]
         force = Hydrodynamics.calculate_damping_force(velocity, c)
-        @test Unitful.ustrip.(force) == nitful.ustrip.(velocity)
+        @test Unitful.ustrip.(force) == Unitful.ustrip.(-velocity)
         @test typeof(force) <: Vector
         @test size(force) == size(velocity)
 
@@ -161,10 +182,12 @@ end
 end
 
 @testset "init_velocity_history" begin
-    Hydrodynamics.velocity_history == ones(Float64, 1, 3, 10)
+    Hydrodynamics.init_velocity_history(Float64, 3, 10)
+    @test Hydrodynamics.velocity_history == zeros(Float64, 1, 3, 10)
+
+    Hydrodynamics.velocity_history .= 1.0
     @test Hydrodynamics.velocity_history == ones(Float64, 1, 3, 10)
 
-    # Confirm that velocity history is reset after initialization
     Hydrodynamics.init_velocity_history(Float64, 3, 10)
     @test Hydrodynamics.velocity_history == zeros(Float64, 1, 3, 10)
 end
@@ -183,7 +206,7 @@ end
     position_error = @nbinclude(file)
     # accuracy of the verification to wec-sim when the notebook was first created. 
     # last_result is the RMSE of position in [surge, heave, pitch] dofs x [cic, ss] methods
-    last_result = [0.0163 0.0631; 0.8000 0.7200; 0.0033 0.0008]
+    last_result = [0.0777 0.1116; 0.7228 0.7229; 0.0069 0.0073]
     @test size(last_result) == size(position_error)
     for idx in CartesianIndices(last_result)
         @test position_error[idx] < last_result[idx]

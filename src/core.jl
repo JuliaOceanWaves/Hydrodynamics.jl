@@ -1,5 +1,21 @@
 import OrdinaryDiffEq as ODE
 import SimpleDiffEq as SDE
+import Unitful
+
+Base.@kwdef struct ExtraSystem
+    n_state::Int
+    rhs = nothing
+    force = nothing
+    p = nothing
+end
+
+Base.@kwdef struct HydroParams
+    inverse_mass::Any
+    hydro::Any
+    u_control = nothing
+    extra_systems = ExtraSystem[]
+    method::Symbol = :point
+end
 
 struct HydrodynamicSolution{TT, TX, TV}
     t::TT
@@ -37,9 +53,9 @@ end
 
 function ramp_function(start_time, ramp_time, current_time)
     if current_time <= start_time
-        return zero(current_time)
+        return 0.0
     elseif current_time >= ramp_time
-        return one(current_time)
+        return 1.0
     end
     return 0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time))
 end
@@ -74,11 +90,16 @@ function init_velocity_history(T, n_dof, n_time_steps)
     global velocity_history = zeros(T, 1, n_dof, n_time_steps)
 end
 
-function calculate_radiation_force_convolution(velocity, irf)
+function calculate_radiation_force_convolution(
+        t, platform_state, system_state, u; p = nothing)
+    n_dof = Int(length(platform_state) / 2)
+    dx = platform_state[(n_dof + 1):(2n_dof)]
+    irf = p
+
     # Convolution integral form of the radiation damping force
     global velocity_history
     velocity_history .= circshift(velocity_history, (0, 0, 1))
-    velocity_history[1, :, 1] = velocity
+    velocity_history[1, :, 1] = dx
 
     Kᵣ, tᵣ = irf # impulse response function tuple
 
@@ -88,6 +109,22 @@ function calculate_radiation_force_convolution(velocity, irf)
         (integrand[:, 1:(end - 1)] .+ integrand[:, 2:end]) .* 0.5 .* dt;
         dims = [2])[:, 1] # nDOF
     return -radiation_force
+end
+
+function calculate_radiation_force_ss(t, platform_state, ss, u; p = nothing)
+    n_dof = Int(length(platform_state) / 2)
+    dx = platform_state[(n_dof + 1):(2n_dof)]
+    Aᵣ, Bᵣ, Cᵣ, Dᵣ, nₛₛ = p
+    return -(Cᵣ * ss + Dᵣ * dx)
+end
+
+function radiation_ss_rhs(t, platform_state, ss, u; p = nothing)
+    n_dof = Int(length(platform_state) / 2)
+    dx = platform_state[(n_dof + 1):(2n_dof)]
+
+    Aᵣ, Bᵣ, Cᵣ, Dᵣ, nₛₛ = p
+
+    return Aᵣ * ss + Bᵣ * dx
 end
 
 function calculate_added_mass_force(acceleration, added_mass_coefficient)
@@ -118,69 +155,116 @@ function calculate_total_linear_hydro_forces(position, velocity, hydro, time)
            net_gravity_buoyancy_force
 end
 
-function hydrodynamic_oscillator(u, p, t)
-    n_dof = Int64(length(u) / 2)
-    x = u[1:n_dof] # position
-    dx = u[(n_dof + 1):end] # velocity
+function set_method(p::HydroParams, method::Symbol)
+    extra_systems = p.extra_systems
 
-    inverse_mass = p[1]
-    hydro = p[2]
-    force_other, u_other, p_other = p[3]
-    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) +
-             force_other(t, [x; dx], u_other; p = p_other)
-    ddx = inverse_mass * Fₜₒₜₐₗ
+    if method == :ss
+        length(p.hydro) >= 6 ||
+            throw(ArgumentError("method = :ss requires state-space data in p.hydro[6]"))
 
-    return [dx; ddx]
+        state_space = p.hydro[6]
+        _, _, _, _, nₛₛ = state_space
+
+        ss_system = ExtraSystem(
+            n_state = nₛₛ,
+            rhs = radiation_ss_rhs,
+            force = calculate_radiation_force_ss,
+            p = state_space
+        )
+
+        extra_systems = [ss_system; p.extra_systems]
+    elseif method == :cic
+        length(p.hydro) >= 6 ||
+            throw(ArgumentError("method = :cic requires impulse response function data in p.hydro[6]"))
+
+        irf = p.hydro[6]
+
+        cic_system = ExtraSystem(
+            n_state = 0,
+            rhs = nothing,
+            force = calculate_radiation_force_convolution,
+            p = irf
+        )
+
+        extra_systems = [cic_system; p.extra_systems]
+    end
+
+    return HydroParams(
+        inverse_mass = p.inverse_mass,
+        hydro = p.hydro,
+        u_control = p.u_control,
+        extra_systems = extra_systems,
+        method = method
+    )
 end
 
-function hydrodynamic_oscillator_cic(u, p, t)
-    n_dof = Int64(length(u) / 2)
-    x = u[1:n_dof] # position
-    dx = u[(n_dof + 1):end] # velocity
+function hydrodynamic_oscillator(state, p::HydroParams, t)
+    n_dof = size(p.inverse_mass, 1)
+    n_hydro = 2 * n_dof
 
-    inverse_mass = p[1]
-    hydro = p[2]
-    cic = hydro[6]
-    force_other, u_other, p_other = p[3]
-    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) +
-             calculate_radiation_force_convolution(dx, cic) +
-             force_other(t, [x; dx], u_other; p = p_other)
-    ddx = inverse_mass * Fₜₒₜₐₗ
+    hydro_state = state[1:n_hydro]
+    extra_state = state[(n_hydro + 1):end]
 
-    return [dx; ddx]
-end
+    x = hydro_state[1:n_dof]
+    dx = hydro_state[(n_dof + 1):n_hydro]
+    platform_state = [x; dx]
 
-function hydrodynamic_oscillator_ss(u, p, t)
-    # u = [position, velocity, states]
-    # added mass should utilize infinite frequency added mass only
-    # c should not include radiation damping
-    # system of equations in u and du should include velocity and the state space vector
-    inverse_mass = p[1]
-    hydro = p[2]
-    state_space = hydro[6]
-    force_other, u_other, p_other = p[3]
-    Aᵣ, Bᵣ, Cᵣ, Dᵣ, nₛₛ = state_space
-    n_dof = Int64((size(u)[1] - nₛₛ) / 2)
+    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, p.hydro, t)
 
-    x = u[1:n_dof] # position
-    dx = u[(n_dof + 1):(n_dof * 2)] # velocity
-    ss = u[(end - nₛₛ + 1):end] # state space vector
+    du_extra_parts = Any[]
+    state_ind = 1
 
-    # The general state space is defined such that:
-    #    dx = Aᵣ * x + Bᵣ * u
-    #     y = Cᵣ * x + Dᵣ * u
-    # Where:
-    #    x is the state vector (ss)
-    #    y is the output (radiation force)
-    #    u is the input (velocity)
-    Fᵣ = - (Cᵣ * ss + Dᵣ * dx)
-    dss = Aᵣ * ss + Bᵣ * dx
+    # Loop through extra systems to add forces and state derivatives.
+    for system in p.extra_systems
+        if system.n_state == 0
+            system.rhs === nothing ||
+                throw(ArgumentError("extra system has rhs but n_state == 0"))
 
-    Fₜₒₜₐₗ = calculate_total_linear_hydro_forces(x, dx, hydro, t) + Fᵣ +
-             force_other(t, [x; dx], u_other; p = p_other)
-    ddx = inverse_mass * Fₜₒₜₐₗ
+            system_state = similar(state, 0)
+        else
+            state_end_ind = state_ind + system.n_state - 1
+            system_state = extra_state[state_ind:state_end_ind]
+            state_ind = state_end_ind + 1
+        end
 
-    return [dx; ddx; dss]
+        if system.force !== nothing
+            Fₜₒₜₐₗ += system.force(
+                t,
+                platform_state,
+                system_state,
+                p.u_control;
+                p = system.p
+            )
+        end
+
+        if system.n_state > 0
+            system.rhs === nothing &&
+                throw(ArgumentError("extra system has n_state > 0 but rhs is nothing"))
+
+            push!(
+                du_extra_parts,
+                system.rhs(
+                    t,
+                    platform_state,
+                    system_state,
+                    p.u_control;
+                    p = system.p
+                )
+            )
+        end
+    end
+
+    state_ind == length(extra_state) + 1 ||
+        throw(ArgumentError("extra state length does not match p.extra_systems"))
+
+    ddx = p.inverse_mass * Fₜₒₜₐₗ
+    du_hydro = [dx; ddx]
+
+    if isempty(du_extra_parts)
+        return du_hydro
+    end
+
+    return [du_hydro; vcat(du_extra_parts...)]
 end
 
 function hydrodynamic_stepping(dx0, x0, ts, p)
@@ -188,38 +272,69 @@ function hydrodynamic_stepping(dx0, x0, ts, p)
     x = [copy(x0) for _ in eachindex(ts)]
     dx = [copy(dx0) for _ in eachindex(ts)]
 
+    n_dof = size(p.inverse_mass, 1)
+
     for i in 1:(length(ts) - 1)
         dt = ts[i + 1] - ts[i]
-        acceleration = hydrodynamic_oscillator([x[i]; dx[i]], p, ts[i])
-        dx[i + 1] = dx[i] + dt * acceleration
+        du = hydrodynamic_oscillator([x[i]; dx[i]], p, ts[i])
+        ddx = du[(n_dof + 1):(2n_dof)]
+
+        dx[i + 1] = dx[i] + dt * ddx
         x[i + 1] = x[i] + dt * dx[i + 1]
     end
 
     return HydrodynamicSolution(ts, x, dx)
 end
 
-function hydrodynamic_solver(u₀, ts, p; method::Symbol = :point)
-    # u₀ = [x₀, dx₀]
-    T = _real_eltype(u₀, p)
-    u₀ = T === eltype(u₀) ? u₀ : convert.(T, u₀)
+function hydrodynamic_solver(hydro_state₀, ts, p::HydroParams; method::Symbol = p.method)
+    # hydro_state₀ = [x₀, dx₀]
+    T = _real_eltype(hydro_state₀, p)
+    # hydro_state₀ = T === eltype(hydro_state₀) ? hydro_state₀ : convert.(T, hydro_state₀)
     dt = diff(ts[1:2])[1]
+    p = set_method(p, method)
 
     if method == :point
-        problem = ODE.ODEProblem(hydrodynamic_oscillator, u₀, ts[[1, end]], p)
+        problem = ODE.ODEProblem(hydrodynamic_oscillator, hydro_state₀, ts[[1, end]], p)
         solution = ODE.solve(problem, ODE.Vern6(), saveat = dt)
 
     elseif method == :cic
-        init_velocity_history(T, size(p[2][6][1], 2), size(p[2][6][1], 3))
-        problem = ODE.ODEProblem(hydrodynamic_oscillator_cic, u₀, ts[[1, end]], p)
+        init_velocity_history(T, size(p.hydro[6][1], 2), size(p.hydro[6][1], 3))
+        problem = ODE.ODEProblem(hydrodynamic_oscillator, hydro_state₀, ts[[1, end]], p)
         solution = ODE.solve(
             problem, SDE.SimpleEuler(), saveat = dt, adaptive = false, dt = dt)
 
     elseif method == :ss
-        problem = ODE.ODEProblem(hydrodynamic_oscillator_ss, u₀, ts[[1, end]], p)
+        problem = ODE.ODEProblem(hydrodynamic_oscillator, hydro_state₀, ts[[1, end]], p)
         solution = ODE.solve(problem, ODE.Vern6(), saveat = dt)
     else
         throw(ArgumentError("method must be a Symbol with value :point, :cic, or :ss"))
     end
 
     return solution
+end
+
+# ustrip: extend `Unitful.ustrip` function
+"""
+    ustrip(x::ExtraSystem)
+
+Extend `Unitful.ustrip` for ExtraSystem.
+"""
+function ustrip(x::ExtraSystem)::ExtraSystem
+    ExtraSystem(n_state = Unitful.ustrip(x.n_state), force = x.force,
+        rhs = x.rhs, p = map(x->Unitful.ustrip.(x), x.p))
+end
+
+"""
+    ustrip(x::HydroParams)
+
+Extend `Unitful.ustrip` for HydroParams.
+"""
+function ustrip(x::HydroParams)::HydroParams
+    Hydrodynamics.HydroParams(
+        inverse_mass = Unitful.ustrip.(x.inverse_mass),
+        hydro = Unitful.ustrip(x.hydro),
+        u_control = Unitful.ustrip.(x.u_control),
+        extra_systems = map(y->ustrip(y), x.extra_systems),
+        method = x.method
+    )
 end
