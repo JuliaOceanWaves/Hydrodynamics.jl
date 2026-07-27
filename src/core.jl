@@ -1,5 +1,6 @@
 import OrdinaryDiffEq as ODE
 import SimpleDiffEq as SDE
+import Unitful
 
 Base.@kwdef struct ExtraSystem
     n_state::Int
@@ -52,9 +53,9 @@ end
 
 function ramp_function(start_time, ramp_time, current_time)
     if current_time <= start_time
-        return zero(current_time)
+        return 0.0
     elseif current_time >= ramp_time
-        return one(current_time)
+        return 1.0
     end
     return 0.5 * (1 .+ cos.(pi .+ pi .* current_time ./ ramp_time))
 end
@@ -287,8 +288,8 @@ end
 
 function hydrodynamic_solver(hydro_state₀, ts, p::HydroParams; method::Symbol = p.method)
     # hydro_state₀ = [x₀, dx₀]
-    T = _real_eltype(hydro_state₀, p)
-    hydro_state₀ = T === eltype(hydro_state₀) ? hydro_state₀ : convert.(T, hydro_state₀)
+    # T = _real_eltype(hydro_state₀, p)
+    # hydro_state₀ = T === eltype(hydro_state₀) ? hydro_state₀ : convert.(T, hydro_state₀)
     dt = diff(ts[1:2])[1]
     p = set_method(p, method)
 
@@ -310,4 +311,30 @@ function hydrodynamic_solver(hydro_state₀, ts, p::HydroParams; method::Symbol 
     end
 
     return solution
+end
+
+# ustrip: extend `Unitful.ustrip` function
+"""
+    ustrip(x::ExtraSystem)
+
+Extend `Unitful.ustrip` for ExtraSystem.
+"""
+function ustrip(x::ExtraSystem)::ExtraSystem
+    ExtraSystem(n_state = Unitful.ustrip(x.n_state), force = x.force,
+        rhs = x.rhs, p = map(x->Unitful.ustrip.(x), x.p))
+end
+
+"""
+    ustrip(x::HydroParams)
+
+Extend `Unitful.ustrip` for HydroParams.
+"""
+function ustrip(x::HydroParams)::HydroParams
+    Hydrodynamics.HydroParams(
+        inverse_mass = Unitful.ustrip.(x.inverse_mass),
+        hydro = Unitful.ustrip(x.hydro),
+        u_control = Unitful.ustrip.(x.u_control),
+        extra_systems = map(y->ustrip(y), x.extra_systems),
+        method = x.method
+    )
 end
