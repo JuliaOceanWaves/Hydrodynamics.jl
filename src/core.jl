@@ -288,7 +288,7 @@ end
 
 function hydrodynamic_solver(hydro_state₀, ts, p::HydroParams; method::Symbol = p.method)
     # hydro_state₀ = [x₀, dx₀]
-    # T = _real_eltype(hydro_state₀, p)
+    T = _real_eltype(hydro_state₀, p)
     # hydro_state₀ = T === eltype(hydro_state₀) ? hydro_state₀ : convert.(T, hydro_state₀)
     dt = diff(ts[1:2])[1]
     p = set_method(p, method)
