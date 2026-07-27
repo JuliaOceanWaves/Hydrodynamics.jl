@@ -18,9 +18,9 @@ end
     @test 0.0 < ramp_function(1.0u"s", 3.0u"s", 2.0u"s") < 1.0
     @test ramp_function(1.0u"s", 3.0u"s", 3.0u"s") == 1.0
     @test ramp_function(1.0u"s", 3.0u"s", 4.0u"s") == 1.0
-    @test_broken ramp_function(1.0u"s^2", 3.0u"s", 4.0u"s")
-    @test_broken ramp_function(1.0u"s", 3.0u"s^2", 4.0u"s")
-    @test_broken ramp_function(1.0u"s", 3.0u"s", 4.0u"s^2")
+    @test_throws Unitful.DimensionError ramp_function(1.0u"s^2", 3.0u"s", 4.0u"s")
+    @test_throws Unitful.DimensionError ramp_function(1.0u"s", 3.0u"s^2", 4.0u"s")
+    @test_throws Unitful.DimensionError ramp_function(1.0u"s", 3.0u"s", 4.0u"s^2")
 end
 
 function linear_extra_force(t, platform_state, system_state, u; p = nothing)
@@ -112,7 +112,7 @@ end
     force_units = Unitful.upreferred.([u"N", u"N*m"])
 
     # test translation, rotational, and mixed unit dofs
-    u = for dof in ([1, 2], [2, 2], [1, 2])
+    for dof in ([1, 2], [2, 2], [1, 2])
         khs = [1.0 0.0; 0.0 1.0] .* stiffness_units[dof, dof]
         position = [2.0, 3.0] .* position_units[dof]
         force = Hydrodynamics.calculate_stiffness_force(position, khs; equilibrium_position = 0.0*position)
@@ -128,14 +128,15 @@ end
     dof = [1, 2]
     khs = [1.0 0.0; 0.0 1.0] .* stiffness_units[dof, dof]
     position = [2.0, 3.0] .* position_units[dof]
-    @test_broken Hydrodynamics.calculate_stiffness_force(position, khs; equilibrium_position = 0.0)
+    @test_throws Unitful.DimensionError Hydrodynamics.calculate_stiffness_force(
+        position, khs; equilibrium_position = Unitful.ustrip.(position*0.0))
 
     # stiffness and position units don't align
     dof = [1, 2]
     khs = [1.0 0.0; 0.0 1.0] .* stiffness_units[dof, dof]
     dof = [1, 1]
     position = [2.0, 3.0] .* position_units[dof]
-    @test_broken Hydrodynamics.calculate_stiffness_force(position, khs)
+    @test_throws Unitful.DimensionError Hydrodynamics.calculate_stiffness_force(position, khs)
 end
 
 @testset "test damping force" begin
@@ -161,7 +162,7 @@ end
     force_units = Unitful.upreferred.([u"N", u"N*m"])
 
     # test translation, rotational, and mixed unit dofs
-    u = for dof in ([1, 2], [2, 2], [1, 2])
+    for dof in ([1, 2], [2, 2], [1, 2])
         c = [1.0 0.0; 0.0 1.0] .* damping_units[dof, dof]
         velocity = [2.0, 3.0] .* velocity_units[dof]
         force = Hydrodynamics.calculate_damping_force(velocity, c)
@@ -178,7 +179,7 @@ end
     c = [1.0 0.0; 0.0 1.0] .* damping_units[dof, dof]
     dof = [1, 1]
     velocity = [2.0, 3.0] .* velocity_units[dof]
-    @test_broken Hydrodynamics.calculate_damping_force(velocity, c)
+    @test_throws Unitful.DimensionError Hydrodynamics.calculate_damping_force(velocity, c)
 end
 
 @testset "init_velocity_history" begin
