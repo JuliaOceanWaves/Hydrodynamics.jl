@@ -3,26 +3,56 @@ using Hydrodynamics
 using LinearAlgebra
 using Test
 
+function linear_extra_force(t, platform_state, system_state, u; p = nothing)
+    n_dof = Int(length(platform_state) / 2)
+    x = platform_state[1:n_dof]
+    dx = platform_state[(n_dof + 1):(2n_dof)]
+    return Hydrodynamics.calculate_linear_force(dx, x, p)
+end
+
 function point_parameters(theta)
     T = eltype(theta)
     inverse_mass = reshape([theta[1]], 1, 1)
     K_hs = reshape([theta[2]], 1, 1)
     B = reshape([theta[3]], 1, 1)
+
     excitation_coeff = zeros(T, 1, 1, 2, 2)
     excitation_coeff[1, 1, 1, 1] = theta[4]
     excitation_coeff[1, 1, 2, 2] = theta[5]
+
     F = [theta[6]]
     wave = ([0.7, 1.4], [0.0, 0.3], [0.20, 0.08], 0.1, 0.0, 1.0)
+
     pto = ([zero(T)], reshape([theta[7]], 1, 1), reshape([theta[8]], 1, 1))
     mooring = ([zero(T)], reshape([theta[9]], 1, 1), reshape([theta[10]], 1, 1))
+
     hydro = (K_hs, B, excitation_coeff, F, wave)
-    return (inverse_mass, hydro, pto, mooring)
+
+    pto_system = Hydrodynamics.ExtraSystem(
+        n_state = 0,
+        force = linear_extra_force,
+        p = pto
+    )
+
+    mooring_system = Hydrodynamics.ExtraSystem(
+        n_state = 0,
+        force = linear_extra_force,
+        p = mooring
+    )
+
+    return Hydrodynamics.HydroParams(
+        inverse_mass = inverse_mass,
+        hydro = hydro,
+        extra_systems = [pto_system, mooring_system]
+    )
 end
 
 function state_space_parameters(theta)
-    inverse_mass, hydro, pto, mooring = point_parameters(theta[1:10])
-    K_hs, _, excitation_coeff, F, wave = hydro
+    p_point = point_parameters(theta[1:10])
+    K_hs, _, excitation_coeff, F, wave = p_point.hydro
+
     B = zeros(eltype(theta), 1, 1)
+
     state_space = (
         reshape([-theta[11]], 1, 1),
         reshape([theta[12]], 1, 1),
@@ -30,22 +60,33 @@ function state_space_parameters(theta)
         reshape([theta[14]], 1, 1),
         1
     )
-    return (inverse_mass, (K_hs, B, excitation_coeff, F, wave, state_space), pto, mooring)
+
+    hydro = (K_hs, B, excitation_coeff, F, wave, state_space)
+
+    return Hydrodynamics.HydroParams(
+        inverse_mass = p_point.inverse_mass,
+        hydro = hydro,
+        extra_systems = p_point.extra_systems
+    )
 end
 
 @testset "Core force and solver paths are ForwardDiff-compatible" begin
     theta = [0.8, 2.5, 0.2, 0.4, -0.1, 0.1, 1.1, 0.05, 0.3, 0.02]
     u = [0.1, -0.2]
-    oscillator_response(theta) = sum(Hydrodynamics.hydrodynamic_oscillator(
-        u, point_parameters(theta), 0.4))
+    oscillator_response(theta) = begin
+        T = eltype(theta)
+        sum(Hydrodynamics.hydrodynamic_oscillator(
+            convert.(T, u), point_parameters(theta), 0.4))
+    end
     gradient = ForwardDiff.gradient(oscillator_response, theta)
     @test all(isfinite, gradient)
     @test norm(gradient) > 0
 
     ts = collect(0.0:0.05:0.2)
     point_solution_response(theta) = begin
+        T = eltype(theta)
         solution = Hydrodynamics.hydrodynamic_solver(
-            [0.1, 0.0], ts, point_parameters(theta); method = :point)
+            convert.(T, [0.1, 0.0]), ts, point_parameters(theta); method = :point)
         solution[1, end] + 0.25 * solution[2, end]
     end
     point_gradient = ForwardDiff.gradient(point_solution_response, theta)
@@ -54,8 +95,9 @@ end
 
     theta_ss = [theta; 0.9; 0.25; 0.18; 0.02]
     ss_solution_response(theta) = begin
+        T = eltype(theta)
         solution = Hydrodynamics.hydrodynamic_solver(
-            [0.1, 0.0, 0.0], ts, state_space_parameters(theta); method = :ss)
+            convert.(T, [0.1, 0.0, 0.0]), ts, state_space_parameters(theta); method = :ss)
         solution[1, end] + 0.25 * solution[2, end] + 0.1 * solution[3, end]
     end
     ss_gradient = ForwardDiff.gradient(ss_solution_response, theta_ss)
@@ -65,11 +107,23 @@ end
 
 @testset "Convolution integral force is ForwardDiff-compatible" begin
     t = reshape(collect(0.0:0.1:0.3), 1, 1, 4)
+
     ci_response(theta) = begin
         K = reshape(theta[1:4], 1, 1, 4)
         Hydrodynamics.velocity_history = zeros(eltype(theta), 1, 1, 4)
-        sum(Hydrodynamics.calculate_ci_force([theta[5]], (K, t)))
+
+        platform_state = [zero(theta[5]), theta[5]]
+        system_state = similar(platform_state, 0)
+
+        sum(Hydrodynamics.calculate_radiation_force_convolution(
+            0.0,
+            platform_state,
+            system_state,
+            nothing;
+            p = (K, t)
+        ))
     end
+
     theta = [0.8, 0.5, 0.2, 0.05, -0.3]
     gradient = ForwardDiff.gradient(ci_response, theta)
     @test all(isfinite, gradient)
