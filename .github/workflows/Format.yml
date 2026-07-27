@@ -12,4 +12,4 @@ jobs:
     steps:
       - uses: julia-actions/julia-format@v4
         with:
-          version: '1.0.62' # VSCode is locked to 1.0.62 (previously was 1.0.54). Specify the Actions version to be the same to reduce formatting overhead
+          version: '1.0.54' # VSCode is locked to 1.0.62 (previously was 1.0.54). Specify the Actions version to be the same to reduce formatting overhead
