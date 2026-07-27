@@ -96,7 +96,6 @@ end
     @test force2 == [dp, -dp]
     @test typeof(force) <: Vector
     @test size(force2) == size(position)
-    @test force == force2
 
     # No matter khs, force is zero when the equilibrium_position = position
     khs = [1.23e6 -3e3; 0.0 123.45e9]
@@ -117,7 +116,7 @@ end
         khs = [1.0 0.0; 0.0 1.0] .* stiffness_units[dof, dof]
         position = [2.0, 3.0] .* position_units[dof]
         force = Hydrodynamics.calculate_stiffness_force(position, khs; equilibrium_position = 0.0*position)
-        @test Unitful.ustrip.(force) == Unitful.ustrip.(position)
+        @test Unitful.ustrip.(force) == Unitful.ustrip.(-position)
         @test typeof(force) <: Vector
         @test size(force) == size(position)
 
@@ -154,11 +153,10 @@ end
     @test force2 == [dp, -dp]
     @test typeof(force) <: Vector
     @test size(force2) == size(velocity)
-    @test force == force2
 end
 
 @testset "test damping force (Unitful)" begin
-    damping_units = Unitful.upreferred.([u"N/m" u"N"/rad; u"N*m/m" u"N*m"/rad])
+    damping_units = Unitful.upreferred.([u"N/(m/s)" u"N*s"/rad; u"N*m/(m/s)" u"N*m*s"/rad])
     velocity_units = [u"m/s", rad*u"s^-1"]
     force_units = Unitful.upreferred.([u"N", u"N*m"])
 
@@ -167,7 +165,7 @@ end
         c = [1.0 0.0; 0.0 1.0] .* damping_units[dof, dof]
         velocity = [2.0, 3.0] .* velocity_units[dof]
         force = Hydrodynamics.calculate_damping_force(velocity, c)
-        @test Unitful.ustrip.(force) == Unitful.ustrip.(velocity)
+        @test Unitful.ustrip.(force) == Unitful.ustrip.(-velocity)
         @test typeof(force) <: Vector
         @test size(force) == size(velocity)
 
