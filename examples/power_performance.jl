@@ -142,6 +142,20 @@ mooring_system = Hydrodynamics.ExtraSystem{Float64}(
 
 extra_systems = [pto_system, mooring_system]
 
+cic_system = Hydrodynamics.ExtraSystem(
+    n_state = 0,
+    rhs = nothing,
+    force = Hydrodynamics.calculate_radiation_force_convolution,
+    p = (Kᵣ, tᵣ)
+)
+
+ss_system = Hydrodynamics.ExtraSystem(
+    n_state = ss[5],
+    rhs = Hydrodynamics.radiation_ss_rhs,
+    force = Hydrodynamics.calculate_radiation_force_ss,
+    p = ss
+)
+
 # Parameter groups
 wave = (ω, ϕ, S, df, t0, tr)
 hydro = (Kₕₛ, B[:, :, maxS_index], fₑₓ, force_hydrostatic, wave) # optionally cic or ss tuples on the end
@@ -155,14 +169,14 @@ hydro_cic = (Kₕₛ, 0.0 .* B[:, :, maxS_index], fₑₓ, force_hydrostatic, wa
 p_cic = Hydrodynamics.HydroParams(
     inverse_mass = inv_mass_inf,
     hydro = hydro_cic,
-    extra_systems = extra_systems
+    extra_systems = [extra_systems, cic_system]
 )
 
 hydro_ss = (Kₕₛ, 0.0 .* B[:, :, maxS_index], fₑₓ, force_hydrostatic, wave, ss)
 p_ss = Hydrodynamics.HydroParams(
     inverse_mass = inv_mass_inf,
     hydro = hydro_ss,
-    extra_systems = extra_systems
+    extra_systems = [extra_systems, ss_system]
 )
 
 # Solve the hydrodynamic system (unitless inputs)
@@ -205,6 +219,7 @@ function power_performance(pto_damping, p)
     pto = Hydrodynamics.ExtraSystem{T}(
         n_state = params.extra_systems[1].n_state,
         force = params.extra_systems[1].force,
+        rhs = params.extra_systems[1].rhs,
         p = (xpto, kpto, cpto)
     )
 
@@ -217,6 +232,19 @@ function power_performance(pto_damping, p)
         p = m_old.p
     )
 
+    if params.method == :point
+        new_systems = [pto, mooring]
+    else
+        es_3_old = params.extra_systems[3]
+        es_3 = Hydrodynamics.ExtraSystem{T}(
+            n_state = es_3_old.n_state,
+            force = es_3_old.force,
+            rhs = es_3_old.rhs,
+            p = es_3_old.p
+        )
+        new_systems = [pto, mooring, es_3]
+    end
+
     # convert initial state and inverse mass to element type T
     u₀_local = convert.(T, u₀_local)
     inv_mass_T = convert.(T, params.inverse_mass)
@@ -224,7 +252,7 @@ function power_performance(pto_damping, p)
     params2 = Hydrodynamics.HydroParams{T}(
         inverse_mass = inv_mass_T,
         hydro = params.hydro,
-        extra_systems = [pto, mooring],
+        extra_systems = new_systems,
         u_control = params.u_control,
         method = params.method
     )
@@ -245,17 +273,12 @@ function power_performance(pto_damping)
         p, u₀, ts, dt, i_ramp, method))
 end
 
-function power_performance_ss(pto_damping)
-    power_performance(pto_damping, (
-        p, u₀_ss, ts, dt, i_ramp, method))
-end
-
 ### Single (point) frequency method - energy and gradient
 ### Calculate energy 
 p = p_point
 method = :point
-energy = power_performance(cₚₜₒ, (p, u₀, ts, dt, i_ramp, method))
-# energy = power_performance(cₚₜₒ)
+# energy = power_performance(cₚₜₒ, (p, u₀, ts, dt, i_ramp, method))
+energy = power_performance(cₚₜₒ)
 
 ### Calculate gradient of energy with respect to PTO damping 
 gradient_fd = FiniteDiff.finite_difference_gradient(power_performance, cₚₜₒ)
@@ -274,7 +297,7 @@ gradient_fd_cic = FiniteDiff.finite_difference_gradient(power_performance, cₚ�
 ### SS method - energy and gradient
 p = p_ss
 method = :ss
-energy_ss = power_performance_ss(cₚₜₒ)
+energy_ss = power_performance(cₚₜₒ)
 
 gradient_fd_ss = FiniteDiff.finite_difference_gradient(power_performance_ss, cₚₜₒ)
 gradient_ad_fd_ss = ForwardDiff.gradient(power_performance_ss, cₚₜₒ)

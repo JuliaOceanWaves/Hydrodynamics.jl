@@ -307,7 +307,7 @@ function hydrodynamic_solver(hydro_state₀, ts, p::HydroParams; method::Symbol 
     T = _real_eltype(hydro_state₀, p)
     # hydro_state₀ = T === eltype(hydro_state₀) ? hydro_state₀ : convert.(T, hydro_state₀)
     dt = diff(ts[1:2])[1]
-    p = set_method(p, method)
+    # p = set_method(p, method)
 
     if method == :point
         problem = ODE.ODEProblem(hydrodynamic_oscillator, hydro_state₀, ts[[1, end]], p)
