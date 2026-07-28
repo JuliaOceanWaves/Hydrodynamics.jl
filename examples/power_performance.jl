@@ -128,13 +128,13 @@ function linear_extra_force(t, platform_state, system_state, u; p = nothing)
     return Hydrodynamics.calculate_linear_force(dx, x, p)
 end
 
-pto_system = Hydrodynamics.ExtraSystem(
+pto_system = Hydrodynamics.ExtraSystem{Float64}(
     n_state = 0,
     force = linear_extra_force,
     p = pto
 )
 
-mooring_system = Hydrodynamics.ExtraSystem(
+mooring_system = Hydrodynamics.ExtraSystem{Float64}(
     n_state = 0,
     force = linear_extra_force,
     p = mooring
@@ -193,26 +193,36 @@ Plots.plot(p1, p2, p3, layout = (3, 1))
 
 # Calculation of net energy over the simulation
 function power_performance(pto_damping, p)
-    T = eltype(pto_damping)
     (params, u₀_local, ts_local, dt_local, i_ramp_local, method) = p
 
-    xpto, kpto, cpto = params.extra_systems[1].p
-    cpto = diagm(pto_damping * ones(3))
-    pto = Hydrodynamics.ExtraSystem(
+    # ensure element type matches PTO damping so Duals propagate
+    T = eltype(pto_damping)
+
+    # construct diagonal PTO matrix with element type T
+    xpto, kpto, _ = params.extra_systems[1].p
+    cpto = Diagonal([pto_damping[i, i] for i in 1:3])
+
+    pto = Hydrodynamics.ExtraSystem{T}(
         n_state = params.extra_systems[1].n_state,
         force = params.extra_systems[1].force,
         p = (xpto, kpto, cpto)
     )
 
-    mooring = Hydrodynamics.ExtraSystem(
-        n_state = params.extra_systems[2].n_state,
-        force = params.extra_systems[2].force,
-        rhs = params.extra_systems[2].rhs,
-        p = params.extra_systems[2].p
+    # rebuild mooring ExtraSystem with same parametric element type
+    m_old = params.extra_systems[2]
+    mooring = Hydrodynamics.ExtraSystem{T}(
+        n_state = m_old.n_state,
+        force = m_old.force,
+        rhs = m_old.rhs,
+        p = m_old.p
     )
 
-    params2 = Hydrodynamics.HydroParams(
-        inverse_mass = params.inverse_mass,
+    # convert initial state and inverse mass to element type T
+    u₀_local = convert.(T, u₀_local)
+    inv_mass_T = convert.(T, params.inverse_mass)
+
+    params2 = Hydrodynamics.HydroParams{T}(
+        inverse_mass = inv_mass_T,
         hydro = params.hydro,
         extra_systems = [pto, mooring],
         u_control = params.u_control,
@@ -244,7 +254,8 @@ end
 ### Calculate energy 
 p = p_point
 method = :point
-energy = power_performance(cₚₜₒ)
+energy = power_performance(cₚₜₒ, (p, u₀, ts, dt, i_ramp, method))
+# energy = power_performance(cₚₜₒ)
 
 ### Calculate gradient of energy with respect to PTO damping 
 gradient_fd = FiniteDiff.finite_difference_gradient(power_performance, cₚₜₒ)
@@ -258,6 +269,7 @@ energy_cic = power_performance(cₚₜₒ)
 
 gradient_fd_cic = FiniteDiff.finite_difference_gradient(power_performance, cₚₜₒ)
 # gradient_ad_fd_cic = ForwardDiff.gradient(power_performance, cₚₜₒ)
+# [gradient_fd_cic gradient_ad_fd_cic]
 
 ### SS method - energy and gradient
 p = p_ss
