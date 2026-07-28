@@ -1,8 +1,7 @@
+using DimensionfulAngles: radᵃ as rad
 using Hydrodynamics
 using Test
-using NBInclude
 using Unitful
-using DimensionfulAngles: radᵃ as rad
 
 @testset "ramp function" begin
     @test ramp_function(1.0, 3.0, 0.5) == 0.0
@@ -18,9 +17,9 @@ end
     @test 0.0 < ramp_function(1.0u"s", 3.0u"s", 2.0u"s") < 1.0
     @test ramp_function(1.0u"s", 3.0u"s", 3.0u"s") == 1.0
     @test ramp_function(1.0u"s", 3.0u"s", 4.0u"s") == 1.0
-    @test_broken ramp_function(1.0u"s^2", 3.0u"s", 4.0u"s")
-    @test_broken ramp_function(1.0u"s", 3.0u"s^2", 4.0u"s")
-    @test_broken ramp_function(1.0u"s", 3.0u"s", 4.0u"s^2")
+    @test_throws Unitful.DimensionError ramp_function(1.0u"s^2", 3.0u"s", 4.0u"s")
+    @test_throws Unitful.DimensionError ramp_function(1.0u"s", 3.0u"s^2", 4.0u"s")
+    @test_throws Unitful.DimensionError ramp_function(1.0u"s", 3.0u"s", 4.0u"s^2")
 end
 
 function linear_extra_force(t, platform_state, system_state, u; p = nothing)
@@ -112,7 +111,7 @@ end
     force_units = Unitful.upreferred.([u"N", u"N*m"])
 
     # test translation, rotational, and mixed unit dofs
-    u = for dof in ([1, 2], [2, 2], [1, 2])
+    for dof in ([1, 2], [2, 2], [1, 2])
         khs = [1.0 0.0; 0.0 1.0] .* stiffness_units[dof, dof]
         position = [2.0, 3.0] .* position_units[dof]
         force = Hydrodynamics.calculate_stiffness_force(position, khs; equilibrium_position = 0.0*position)
@@ -128,14 +127,15 @@ end
     dof = [1, 2]
     khs = [1.0 0.0; 0.0 1.0] .* stiffness_units[dof, dof]
     position = [2.0, 3.0] .* position_units[dof]
-    @test_broken Hydrodynamics.calculate_stiffness_force(position, khs; equilibrium_position = 0.0)
+    @test_throws Unitful.DimensionError Hydrodynamics.calculate_stiffness_force(
+        position, khs; equilibrium_position = Unitful.ustrip.(position*0.0))
 
     # stiffness and position units don't align
     dof = [1, 2]
     khs = [1.0 0.0; 0.0 1.0] .* stiffness_units[dof, dof]
     dof = [1, 1]
     position = [2.0, 3.0] .* position_units[dof]
-    @test_broken Hydrodynamics.calculate_stiffness_force(position, khs)
+    @test_throws Unitful.DimensionError Hydrodynamics.calculate_stiffness_force(position, khs)
 end
 
 @testset "test damping force" begin
@@ -161,7 +161,7 @@ end
     force_units = Unitful.upreferred.([u"N", u"N*m"])
 
     # test translation, rotational, and mixed unit dofs
-    u = for dof in ([1, 2], [2, 2], [1, 2])
+    for dof in ([1, 2], [2, 2], [1, 2])
         c = [1.0 0.0; 0.0 1.0] .* damping_units[dof, dof]
         velocity = [2.0, 3.0] .* velocity_units[dof]
         force = Hydrodynamics.calculate_damping_force(velocity, c)
@@ -178,7 +178,7 @@ end
     c = [1.0 0.0; 0.0 1.0] .* damping_units[dof, dof]
     dof = [1, 1]
     velocity = [2.0, 3.0] .* velocity_units[dof]
-    @test_broken Hydrodynamics.calculate_damping_force(velocity, c)
+    @test_throws Unitful.DimensionError Hydrodynamics.calculate_damping_force(velocity, c)
 end
 
 @testset "init_velocity_history" begin
@@ -199,24 +199,4 @@ end
     @test length(hydro.period) == length(hydro.w)
     @test size(hydro.ex, 1) > 0
     @test size(hydro.khs, 1) > 0
-end
-
-@testset "WEC-Sim verification" begin
-    file = joinpath(@__DIR__, "..", "examples", "wec-sim_comparison_3dof.ipynb")
-    position_error = @nbinclude(file)
-    # accuracy of the verification to wec-sim when the notebook was first created. 
-    # last_result is the RMSE of position in [surge, heave, pitch] dofs x [cic, ss] methods
-    last_result = [0.0777 0.1116; 0.7228 0.7229; 0.0069 0.0073]
-    @test size(last_result) == size(position_error)
-    for idx in CartesianIndices(last_result)
-        @test position_error[idx] < last_result[idx]
-    end
-end
-
-@testset "AF verification" begin
-    # TODO - use power performance notebook to confirm gradients are functional
-    last_result = 0.051
-    file = joinpath(@__DIR__, "..", "examples", "power_performance.ipynb")
-    mae = @nbinclude(file)
-    @test mae < last_result
 end

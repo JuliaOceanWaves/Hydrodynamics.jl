@@ -7,6 +7,9 @@ using Test, SafeTestsets
     @time @safetestset "Test Hydrodynamics" begin
         include("test_hydrodynamics.jl")
     end
+    @time @safetestset "Regression Test - Hydrodynamics accuracy" begin
+        include("test_regression.jl")
+    end
     # @time @safetestset "Doc Tests" begin
     #     include("test_doctest.jl")
     # end

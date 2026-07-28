@@ -2,19 +2,35 @@ import OrdinaryDiffEq as ODE
 import SimpleDiffEq as SDE
 import Unitful
 
-Base.@kwdef struct ExtraSystem
+Base.@kwdef struct ExtraSystem{T}
     n_state::Int
     rhs = nothing
     force = nothing
-    p = nothing
+    p = nothing                # allow fields to contain values of element type T (or Dual)
 end
 
-Base.@kwdef struct HydroParams
-    inverse_mass::Any
+Base.@kwdef struct HydroParams{T}
+    inverse_mass::AbstractMatrix{T}
     hydro::Any
     u_control = nothing
-    extra_systems = ExtraSystem[]
+    extra_systems::Vector{ExtraSystem{T}} = ExtraSystem{T}[]
     method::Symbol = :point
+end
+
+# Convenience constructor: allow calling ExtraSystem(...) without specifying {T}
+function ExtraSystem(; n_state::Int = 0, rhs = nothing, force = nothing, p = nothing)
+    T = _real_eltype(p)
+    return ExtraSystem{T}(n_state = n_state, rhs = rhs, force = force, p = p)
+end
+
+# Convenience constructor: allow calling HydroParams(...) without specifying {T}
+# Infers T from the inverse_mass matrix element type (typical case) or from extra_systems
+function HydroParams(; inverse_mass, hydro, u_control = nothing,
+        extra_systems = ExtraSystem[], method::Symbol = :point)
+    T = _real_eltype(inverse_mass, extra_systems)
+    return HydroParams{T}(
+        inverse_mass = inverse_mass, hydro = hydro, u_control = u_control,
+        extra_systems = extra_systems, method = method)
 end
 
 struct HydrodynamicSolution{TT, TX, TV}
@@ -291,7 +307,7 @@ function hydrodynamic_solver(hydro_state₀, ts, p::HydroParams; method::Symbol 
     T = _real_eltype(hydro_state₀, p)
     # hydro_state₀ = T === eltype(hydro_state₀) ? hydro_state₀ : convert.(T, hydro_state₀)
     dt = diff(ts[1:2])[1]
-    p = set_method(p, method)
+    # p = set_method(p, method)
 
     if method == :point
         problem = ODE.ODEProblem(hydrodynamic_oscillator, hydro_state₀, ts[[1, end]], p)
@@ -319,9 +335,13 @@ end
 
 Extend `Unitful.ustrip` for ExtraSystem.
 """
-function ustrip(x::ExtraSystem)::ExtraSystem
-    ExtraSystem(n_state = Unitful.ustrip(x.n_state), force = x.force,
-        rhs = x.rhs, p = map(x->Unitful.ustrip.(x), x.p))
+function ustrip(x::ExtraSystem{T}) where {T}
+    ExtraSystem{T}(
+        n_state = Unitful.ustrip(x.n_state),
+        force = x.force,
+        rhs = x.rhs,
+        p = map(y -> Unitful.ustrip.(y), x.p)
+    )
 end
 
 """
@@ -329,12 +349,12 @@ end
 
 Extend `Unitful.ustrip` for HydroParams.
 """
-function ustrip(x::HydroParams)::HydroParams
-    Hydrodynamics.HydroParams(
+function ustrip(x::HydroParams{T}) where {T}
+    HydroParams{T}(
         inverse_mass = Unitful.ustrip.(x.inverse_mass),
         hydro = Unitful.ustrip(x.hydro),
         u_control = Unitful.ustrip.(x.u_control),
-        extra_systems = map(y->ustrip(y), x.extra_systems),
+        extra_systems = map(y -> ustrip(y), x.extra_systems),
         method = x.method
     )
 end
