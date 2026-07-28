@@ -299,8 +299,8 @@ p = p_ss
 method = :ss
 energy_ss = power_performance(cₚₜₒ)
 
-gradient_fd_ss = FiniteDiff.finite_difference_gradient(power_performance_ss, cₚₜₒ)
-gradient_ad_fd_ss = ForwardDiff.gradient(power_performance_ss, cₚₜₒ)
+gradient_fd_ss = FiniteDiff.finite_difference_gradient(power_performance, cₚₜₒ)
+gradient_ad_fd_ss = ForwardDiff.gradient(power_performance, cₚₜₒ)
 
 [energy, energy_cic, energy_ss]
 
