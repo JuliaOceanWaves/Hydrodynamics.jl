@@ -295,7 +295,7 @@ function hydrodynamic_solver(hydro_state₀, ts, p::HydroParams; method::Symbol=
 
     if method == :point
         problem = ODE.ODEProblem(hydrodynamic_oscillator, hydro_state₀, ts[[1, end]], p)
-        solution = ODE.solve(problem, ODE.Vern6(), saveat=dt)
+        solution = ODE.solve(problem, ODE.Vern7(), saveat=dt)
 
     elseif method == :cic
         init_velocity_history(T, size(p.hydro[6][1], 2), size(p.hydro[6][1], 3))
@@ -305,7 +305,7 @@ function hydrodynamic_solver(hydro_state₀, ts, p::HydroParams; method::Symbol=
 
     elseif method == :ss
         problem = ODE.ODEProblem(hydrodynamic_oscillator, hydro_state₀, ts[[1, end]], p)
-        solution = ODE.solve(problem, ODE.Vern6(), saveat=dt)
+        solution = ODE.solve(problem, ODE.Vern7(), saveat=dt)
     else
         throw(ArgumentError("method must be a Symbol with value :point, :cic, or :ss"))
     end
